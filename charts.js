@@ -1,3 +1,5 @@
+import { bindScrubber } from './scrubber.js';
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const PLOTS = [
   { title: '计算利用率', unit: '%', series: [['cpu', '进程 CPU'], ['gpu', 'GPU']] },
@@ -125,26 +127,44 @@ function section(title, unit) {
 }
 
 function cursorOverlay(root, layout, bottom) {
-  const group = svg('g', { class: 'lc-cursor', visibility: 'hidden', 'aria-hidden': 'true' });
+  // A moving cursor gets its own paint layer; the sampled curves stay cached.
+  const frame = html('div', 'lc-frame');
+  const layer = svg('svg', { class: 'lc-overlay', viewBox: root.getAttribute('viewBox'), 'aria-hidden': 'true' });
+  frame.append(root, layer);
+  const group = svg('g', { class: 'lc-cursor', visibility: 'hidden' });
   const line = svg('line', { x1: 0, x2: 0, y1: layout.top - 2, y2: bottom + 1, class: 'lc-crosshair' });
   const label = svg('g', {});
   const text = svg('text', { x: 0, y: 13, 'text-anchor': 'middle' });
-  const background = svg('rect', { x: -32, y: 0, width: 64, height: 19, rx: 6 });
+  const labelText = document.createTextNode('');
+  text.append(labelText);
+  const background = svg('rect', { y: 0, height: 19, rx: 6 });
   label.append(background, text);
   group.append(line, label);
-  root.append(group);
-  return (time) => {
-    group.setAttribute('visibility', time === null ? 'hidden' : 'visible');
+  layer.append(group);
+  let previousTime = null, previousHalf = 0, previousOffset;
+  return { frame, layer, update(time) {
+    if (time === previousTime) return;
+    if (time === null || previousTime === null) {
+      group.setAttribute('visibility', time === null ? 'hidden' : 'visible');
+    }
+    previousTime = time;
     if (time === null) return;
     const x = layout.scaleX(time);
-    line.setAttribute('transform', 'translate(' + x + ' 0)');
+    group.setAttribute('transform', 'translate(' + x + ' 0)');
     const value = time.toFixed(2) + ' s';
+    if (labelText.data !== value) labelText.data = value;
     const half = Math.min((layout.right - layout.left) / 2, Math.max(27, value.length * 3.7 + 6));
-    background.setAttribute('x', -half);
-    background.setAttribute('width', half * 2);
-    label.setAttribute('transform', 'translate(' + clamp(x, layout.left + half, layout.right - half) + ' ' + (bottom + 3) + ')');
-    text.textContent = value;
-  };
+    if (half !== previousHalf) {
+      background.setAttribute('x', -half);
+      background.setAttribute('width', half * 2);
+      previousHalf = half;
+    }
+    const offset = clamp(x, layout.left + half, layout.right - half) - x;
+    if (offset !== previousOffset) {
+      label.setAttribute('transform', 'translate(' + offset + ' ' + (bottom + 3) + ')');
+      previousOffset = offset;
+    }
+  }};
 }
 
 function metricPanel(config, samples, range, layout) {
@@ -191,25 +211,38 @@ function metricPanel(config, samples, range, layout) {
   });
   if (!hasData) root.append(svg('text', { x: (left + right) / 2, y: (top + bottom) / 2, 'text-anchor': 'middle', class: 'lc-empty' }, '当前范围无采样'));
   const overlay = cursorOverlay(root, layout, bottom);
+  const sampleMarkers = svg('g', { class: 'lc-sample-marks' });
+  overlay.layer.append(sampleMarkers);
   const marks = COLORS.map(color => {
-    const mark = svg('circle', { r: 3.8, fill: color, stroke: 'var(--lc-surface)', 'stroke-width': 1.8, visibility: 'hidden', 'pointer-events': 'none' });
-    root.append(mark);
+    const mark = svg('circle', { r: 3.8, fill: color, stroke: 'var(--lc-surface)', 'stroke-width': 1.8, visibility: 'hidden' });
+    sampleMarkers.append(mark);
     return mark;
   });
-  block.append(root);
+  const previousValues = [];
+  let previousSample, previousVisible, previousAria;
+  block.append(overlay.frame);
   return { block, root, update(time, sample) {
-    overlay(time);
-    if (time !== null) root.setAttribute('aria-valuenow', time.toFixed(3));
+    overlay.update(time);
+    const visible = time !== null;
+    const aria = visible ? time.toFixed(3) : null;
+    if (visible && aria !== previousAria) root.setAttribute('aria-valuenow', aria);
+    previousAria = aria;
+    if (sample === previousSample && visible === previousVisible) return;
+    if (visible && sample) sampleMarkers.setAttribute('transform', 'translate(' + scaleX(sample.time) + ' 0)');
     for (let i = 0; i < config.series.length; i++) {
-      const key = config.series[i][0], v = sample?.[key];
-      const show = time !== null && Number.isFinite(v);
-      values[i].textContent = time !== null ? (show ? number(v) + ' ' + config.unit : '—') : '';
-      marks[i].setAttribute('visibility', show ? 'visible' : 'hidden');
-      if (show) {
-        marks[i].setAttribute('cx', scaleX(sample.time));
-        marks[i].setAttribute('cy', scaleY(v));
+      const v = visible ? sample?.[config.series[i][0]] : null;
+      if (v === previousValues[i] && visible === previousVisible) continue;
+      const measured = Number.isFinite(v);
+      const valueText = visible ? (measured ? number(v) + ' ' + config.unit : '—') : '';
+      if (values[i].textContent !== valueText) values[i].textContent = valueText;
+      if (measured !== Number.isFinite(previousValues[i])) {
+        marks[i].setAttribute('visibility', measured ? 'visible' : 'hidden');
       }
+      if (measured) marks[i].setAttribute('cy', scaleY(v));
+      previousValues[i] = v;
     }
+    previousSample = sample;
+    previousVisible = visible;
   }};
 }
 
@@ -247,20 +280,33 @@ function stagePanel(stages, range, layout, onStage) {
       }
     });
     root.append(group);
-    return { group, s };
+    return { group, s, active: false };
   });
   if (!rows.length) root.append(svg('text', { x: (left + right) / 2, y: layout.top + 17, 'text-anchor': 'middle', class: 'lc-empty' }, '当前范围未标注阶段'));
   const overlay = cursorOverlay(root, layout, bottom);
-  block.append(root);
+  block.append(overlay.frame);
   return { block, root, update(time) {
-    overlay(time);
-    for (const { group, s } of rows) group.classList.toggle('lc-active', time !== null && time >= s.start && time < s.end);
+    overlay.update(time);
+    for (const row of rows) {
+      const active = time !== null && time >= row.s.start && time < row.s.end;
+      if (active !== row.active) {
+        row.group.classList.toggle('lc-active', active);
+        row.active = active;
+      }
+    }
   }};
 }
 
 export function mountCharts(container, { onCursor, onStage }) {
   let data = null, range = [0, 1], panels = [], width = 0, currentTime = null, currentSample = null;
-  let resizeFrame = 0, includeEnd = true;
+  let resizeFrame = 0, includeEnd = true, left = 0, right = 1;
+  const input = bindScrubber(container, {
+    surfaceFor: target => target.closest('.lc-plot'),
+    onPosition(fraction) {
+      const [start, end] = range;
+      onCursor(start + clamp((fraction * width - left) / (right - left), 0, 1) * (end - start));
+    },
+  });
   container.classList.add('lc-charts');
   function contentWidth() {
     const style = getComputedStyle(container);
@@ -289,13 +335,16 @@ export function mountCharts(container, { onCursor, onStage }) {
       next = Math.max(start, samples[idx]?.time ?? start);
     } else return;
     event.preventDefault();
+    input.cancelFrame();
     onCursor(next);
   }
 
   function draw() {
     if (!data) return;
+    input.reset();
     width = contentWidth();
-    const left = width < 520 ? 39 : 49, right = Math.max(left + 1, width - (width < 520 ? 13 : 20));
+    left = width < 520 ? 39 : 49;
+    right = Math.max(left + 1, width - (width < 520 ? 13 : 20));
     const [start, end] = range, span = end - start;
     const layout = { left, right, width, top: 11, scaleX: t => left + (t - start) / (span || 1) * (right - left) };
     const samples = data.samples.slice(firstAt(data.samples, start), firstAt(data.samples, end, includeEnd));
@@ -303,14 +352,6 @@ export function mountCharts(container, { onCursor, onStage }) {
     panels.push(stagePanel(data.stages, range, layout, onStage));
     container.replaceChildren(...panels.map(panel => panel.block));
     for (const { root } of panels) {
-      function point(event) {
-        const rect = root.getBoundingClientRect();
-        const x = (event.clientX - rect.left) / rect.width * width;
-        onCursor(start + clamp((x - left) / (right - left), 0, 1) * span);
-      }
-      root.addEventListener('pointermove', point);
-      root.addEventListener('pointerdown', point);
-      root.addEventListener('pointerleave', event => { if (event.pointerType !== 'touch') onCursor(null); });
       root.addEventListener('keydown', moveKey);
       root.addEventListener('focus', () => { if (currentTime === null) onCursor(start); });
     }
@@ -332,6 +373,7 @@ export function mountCharts(container, { onCursor, onStage }) {
     },
     setCursor,
     destroy() {
+      input.destroy();
       observer.disconnect();
       cancelAnimationFrame(resizeFrame);
       panels = [];

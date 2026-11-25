@@ -2,6 +2,7 @@ import { demoTrace, normalizeTrace, REFERENCE_STAGES } from './data.js';
 import { mountCharts, STAGE_COLORS } from './charts.js';
 import { getCounterOptions, chooseCounterMapping } from './mapping.js';
 
+import { bindScrubber } from './scrubber.js';
 import { readCaptureFiles } from './import-files.js';
 
 const byId = (id) => document.getElementById(id);
@@ -13,7 +14,11 @@ const metrics = [
 ];
 const metricsFormat = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 });
 let dataset, focusedStage, sourceJson, failedFile, sourceFilename;
-let ribbonMarker;
+let ribbonMarker, displayedSample;
+const cursorTime = byId('cursor-time');
+const cursorStage = byId('cursor-stage');
+const sampleTime = byId('sample-time');
+const stageRibbon = byId('ribbon');
 let range = [0, 1], importVersion = 0;
 const valueCells = new Map();
 const stageButtons = new Map();
@@ -53,25 +58,43 @@ function lowerBound(samples, time) {
 function nearestSample(time) {
   const rows = dataset.samples;
   const pos = lowerBound(rows, time);
-  const nearby = [rows[pos - 1], rows[pos]].filter(row =>
-    row && row.time >= range[0] && (focusedStage ? row.time < range[1] : row.time <= range[1]));
-  return nearby.sort((a, b) => Math.abs(a.time - time) - Math.abs(b.time - time))[0] ?? null;
+  const before = rows[pos - 1];
+  const after = rows[pos];
+  function inRange(row) {
+    return row && row.time >= range[0] && (focusedStage ? row.time < range[1] : row.time <= range[1]);
+  }
+  if (!inRange(before)) return inRange(after) ? after : null;
+  if (!inRange(after)) return before;
+  return time - before.time <= after.time - time ? before : after;
+}
+
+function setText(element, text) {
+  if (element.textContent === text) return;
+  if (element.firstChild) element.firstChild.nodeValue = text;
+  else element.textContent = text;
 }
 
 function updateCursor(time) {
   if (!dataset || !Number.isFinite(time)) return;
   const sample = nearestSample(time);
   const stages = dataset.stages.filter(stage => time >= stage.start && time < stage.end);
-  byId('cursor-time').textContent = time.toFixed(2);
-  byId('cursor-stage').textContent = focusedStage && time === focusedStage.end
+  setText(cursorTime, time.toFixed(2));
+  const name = focusedStage && time === focusedStage.end
     ? focusedStage.name + ' · 阶段终点'
     : stages.map(stage => stage.name).join(' / ') || '未标注阶段';
-  byId('sample-time').textContent = sample ? '最近采样 ' + sample.time.toFixed(3) + ' s' : '窗口内无采样';
-  for (const [key, cell] of valueCells) {
-    cell.textContent = Number.isFinite(sample?.[key]) ? metricsFormat.format(sample[key]) : '—';
+  if (cursorStage.textContent !== name) {
+    setText(cursorStage, name);
+    cursorStage.title = name;
+  }
+  if (displayedSample !== sample) {
+    displayedSample = sample;
+    setText(sampleTime, sample ? '最近采样 ' + sample.time.toFixed(3) + ' s' : '窗口内无采样');
+    for (const [key, cell] of valueCells) {
+      setText(cell, Number.isFinite(sample?.[key]) ? metricsFormat.format(sample[key]) : '—');
+    }
   }
   charts.setCursor(time, sample);
-  if (ribbonMarker) ribbonMarker.style.left = (dataset.duration > 0 ? 100 * time / dataset.duration : 0) + '%';
+  if (ribbonMarker) ribbonMarker.style.transform = 'translateX(' + (dataset.duration > 0 ? 100 * time / dataset.duration : 0) + '%)';
 }
 
 function selectStage(stage) {
@@ -93,6 +116,7 @@ function selectStage(stage) {
 }
 
 function showData(data, fileName, json = null) {
+  ribbonInput.reset();
   dataset = data;
   sourceJson = json;
   sourceFilename = fileName;
@@ -168,7 +192,10 @@ function buildRibbon(data) {
   });
   ribbonMarker = document.createElement('span');
   ribbonMarker.className = 'phase-marker';
-  ribbon.append(ribbonMarker);
+  const markerClip = document.createElement('span');
+  markerClip.className = 'phase-marker-clip';
+  markerClip.append(ribbonMarker);
+  ribbon.append(markerClip);
   const axis = byId('ribbon-axis');
   axis.replaceChildren();
   for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
@@ -177,6 +204,17 @@ function buildRibbon(data) {
     axis.append(tick);
   }
 }
+
+const ribbonInput = bindScrubber(stageRibbon, {
+  surfaceFor: () => stageRibbon,
+  hover: false,
+  onDragStart() {
+    if (focusedStage) selectStage(null);
+  },
+  onPosition(fraction) {
+    updateCursor(Math.max(0, Math.min(1, fraction)) * dataset.duration);
+  },
+});
 
 function closeMenu(returnFocus = false) {
   byId('stage-menu').hidden = true;
