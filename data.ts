@@ -1,6 +1,15 @@
 // Canonical units: seconds, percent of allocated CPU, percent GPU, GiB, MiB/s.
-const METRICS = ['cpu', 'gpu', 'rss', 'vram', 'read', 'write', 'rx', 'tx'];
-const REFERENCE = [
+import { METRIC_KEYS, type MetricKey, type Sample, type Stage, type Trace } from './model.ts';
+
+type JsonRecord = Record<string, unknown>;
+type Interval = { id: string; start: number; duration: number };
+type CounterSpec = { key: MetricKey; factor: number };
+type UnitFactors = Array<[string, number]>;
+
+function isRecord(value: unknown): value is JsonRecord {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+const REFERENCE: Array<[string, string, number, number]> = [
   ['runtime.import_torch', 'Torch 导入', 0.78, 5.18],
   ['runtime.import_pipeline', 'Pipeline 导入', 6.39, 27.73],
   ['prompt.encode', '文本编码与相关模型准备', 34.78, 96.95],
@@ -16,18 +25,18 @@ export const REFERENCE_STAGES = Object.freeze(REFERENCE.map(([id, name, start, d
 ));
 const STAGE_NAMES = new Map(REFERENCE.map(([id, name]) => [id, name]));
 
-function number(value, path) {
+function number(value: unknown, path: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
     throw new Error(path + ' 应为非负有限数字。');
   }
   return value;
 }
 
-function emptySample(time) {
+function emptySample(time: number): Sample {
   return { time, cpu: null, gpu: null, rss: null, vram: null, read: null, write: null, rx: null, tx: null };
 }
 
-function setMetric(row, key, value, path) {
+function setMetric(row: Sample, key: MetricKey, value: unknown, path: string) {
   if (value === null || value === undefined) return;
   const n = number(value, path);
   if ((key === 'cpu' || key === 'gpu') && n > 100) {
@@ -39,12 +48,12 @@ function setMetric(row, key, value, path) {
   row[key] = n;
 }
 
-function stageList(stages) {
+function stageList(stages: unknown): Stage[] {
   if (!Array.isArray(stages)) throw new Error('stages 应为数组。');
-  const ids = new Set();
+  const ids = new Set<string>();
   return stages.map((s, index) => {
     const path = 'stages[' + index + ']';
-    if (!s || typeof s !== 'object' || typeof s.id !== 'string' || !s.id.trim()) {
+    if (!isRecord(s) || typeof s.id !== 'string' || !s.id.trim()) {
       throw new Error(path + ' 需要字符串 id。');
     }
     if (ids.has(s.id)) throw new Error('阶段 id 重复：' + s.id);
@@ -58,9 +67,9 @@ function stageList(stages) {
   }).sort((a, b) => a.start - b.start || b.end - a.end);
 }
 
-function finish(byTime, stages, document) {
+function finish(byTime: Map<number, Sample>, stages: Stage[], document: JsonRecord): Trace {
   const samples = Array.from(byTime.values()).sort((a, b) => a.time - b.time);
-  if (!samples.some(sample => METRICS.some(key => sample[key] !== null))) {
+  if (!samples.some(sample => METRIC_KEYS.some(key => sample[key] !== null))) {
     throw new Error('没有可显示的资源采样。请提供 samples 或包含支持的资源计数器的 Chrome Trace。');
   }
   const lastStage = stages.reduce((max, s) => Math.max(max, s.end), 0);
@@ -70,15 +79,15 @@ function finish(byTime, stages, document) {
   return { title: typeof document.title === 'string' ? document.title : '', duration: Math.max(duration, lastTime), stages, samples };
 }
 
-function canonical(document) {
+function canonical(document: JsonRecord): Trace {
   if (!Array.isArray(document.samples)) throw new Error('samples 应为数组。');
-  const byTime = new Map();
+  const byTime = new Map<number, Sample>();
   for (const [i, sample] of document.samples.entries()) {
     const path = 'samples[' + i + ']';
-    if (!sample || typeof sample !== 'object') throw new Error(path + ' 应为对象。');
+    if (!isRecord(sample)) throw new Error(path + ' 应为对象。');
     const time = number(sample.time, path + '.time');
     const row = byTime.get(time) || emptySample(time);
-    for (const key of METRICS) setMetric(row, key, sample[key], path + '.' + key);
+    for (const key of METRIC_KEYS) setMetric(row, key, sample[key], path + '.' + key);
     byTime.set(time, row);
   }
   const stages = document.stages ?? (document.stagePreset === 'ltx-reference' ? REFERENCE_STAGES : []);
@@ -87,7 +96,7 @@ function canonical(document) {
 
 // The demo is generated locally. The stage schedule illustrates the reference
 // pipeline; none of the resource values are measurements from a capture.
-export function demoTrace() {
+export function demoTrace(): Trace {
   const duration = 224;
   const stages = REFERENCE_STAGES.map(s => ({ ...s }));
   const samples = [];
@@ -137,33 +146,33 @@ export function demoTrace() {
       row.rss = 3.2;
       row.write = 10 + oscillation * 33;
     }
-    for (const key of METRICS) row[key] = Math.round(row[key] * 100) / 100;
+    for (const key of METRIC_KEYS) row[key] = Math.round(row[key] * 100) / 100;
     samples.push(row);
   }
   return { title: 'LTX-2.5 模拟示例', duration, stages, samples };
 }
 
-function token(label) {
+function token(label: unknown) {
   return String(label ?? '').toLowerCase().replace(/%/g, 'pct').replace(/[^a-z0-9]/g, '');
 }
 
 // Unit-aware aliases are intentionally limited to gauges and transfer rates.
 // A cumulative byte counter must first be differentiated over elapsed time.
-const COUNTERS = new Map();
-function register(key, aliases, units) {
+const COUNTERS = new Map<string, CounterSpec>();
+function register(key: MetricKey, aliases: string, units: UnitFactors) {
   for (const alias of aliases.split(' ')) {
     for (const [unit, factor] of units) {
       COUNTERS.set(alias + unit, { key, factor });
     }
   }
 }
-const percent = [['', 1], ['pct', 1], ['percent', 1], ['percentage', 1]];
-const memory = [['', 1], ['gib', 1], ['mib', 1 / 1024], ['kib', 1 / 1024 ** 2],
+const percent: UnitFactors = [['', 1], ['pct', 1], ['percent', 1], ['percentage', 1]];
+const memory: UnitFactors = [['', 1], ['gib', 1], ['mib', 1 / 1024], ['kib', 1 / 1024 ** 2],
   ['bytes', 1 / 1024 ** 3], ['gb', 1e9 / 1024 ** 3], ['mb', 1e6 / 1024 ** 3]];
-const rates = [['', 1]];
+const rates: UnitFactors = [['', 1]];
 for (const [unit, factor] of [['mib', 1], ['kib', 1 / 1024], ['gib', 1024],
   ['mb', 1e6 / 1024 ** 2], ['kb', 1e3 / 1024 ** 2], ['gb', 1e9 / 1024 ** 2],
-  ['bytes', 1 / 1024 ** 2], ['b', 1 / 1024 ** 2]]) {
+  ['bytes', 1 / 1024 ** 2], ['b', 1 / 1024 ** 2]] as const) {
   for (const suffix of ['s', 'ps', 'sec', 'persec', 'persecond', 'pers']) {
     rates.push([unit + suffix, factor]);
   }
@@ -179,7 +188,7 @@ register('tx', 'tx pcietx devicepcietx gpupcietx pcietxthroughput', rates);
 
 const UNIT_SUFFIX = /(pct|percent|percentage|(?:bytes|gib|mib|kib|gb|mb|kb|b)(?:persecond|persec|pers|sec|ps|s)?)$/;
 
-export function counterField(group, field, onlyValue) {
+export function counterField(group: unknown, field: unknown, onlyValue: boolean): CounterSpec | null {
   const name = token(group);
   const arg = token(field);
   const suffix = name.match(UNIT_SUFFIX)?.[0] || '';
@@ -201,11 +210,11 @@ export function counterField(group, field, onlyValue) {
 
 // Both capture tables use seconds since the capture process started. Parsing
 // the CSV fields by name also keeps logical reads distinct from storage reads.
-function csvRows(text, requiredColumns, fileName) {
+function csvRows(text: string, requiredColumns: string[], fileName: string): Record<string, string>[] {
   if (typeof text !== 'string') throw new Error(fileName + ' 应为 CSV 文本。');
   const input = text.replace(/^\uFEFF/, '');
-  const rows = [];
-  let row = [], value = '', quoted = false;
+  const rows: string[][] = [];
+  let row: string[] = [], value = '', quoted = false;
   for (let i = 0; i < input.length; i++) {
     const ch = input[i];
     if (ch === '"') {
@@ -237,8 +246,8 @@ function csvRows(text, requiredColumns, fileName) {
   });
 }
 
-function intervalsToStages(intervals) {
-  const counts = new Map();
+function intervalsToStages(intervals: Interval[]) {
+  const counts = new Map<string, number>();
   return intervals.sort((a, b) => a.start - b.start).map(({ id, start, duration }) => {
     const count = (counts.get(id) || 0) + 1;
     counts.set(id, count);
@@ -251,17 +260,24 @@ const RESOURCE_COLUMNS = {
   write: 'process_write_mib_s', rx: 'pcie_rx_mib_s', tx: 'pcie_tx_mib_s',
 };
 
-export function normalizeCaptureTables(resourcesCSV, phasesCSV, options = {}) {
+interface CaptureOptions {
+  allocatedCores?: number;
+  duration?: number;
+  title?: string;
+}
+
+export function normalizeCaptureTables(resourcesCSV: string, phasesCSV?: string | null, options: CaptureOptions = {}): Trace {
   const rows = csvRows(resourcesCSV, ['elapsed_s'], 'resources.csv');
+  const { allocatedCores = 0 } = options;
   const needsCores = rows.some(row => row.cpu_cores !== undefined && row.cpu_cores !== '');
-  if (needsCores && !(Number.isFinite(options.allocatedCores) && options.allocatedCores > 0)) {
+  if (needsCores && !(Number.isFinite(allocatedCores) && allocatedCores > 0)) {
     throw new Error('请指定本次采集分配的 CPU 核数，以换算 CPU 利用率。');
   }
   const samples = rows.map((row, i) => {
     if (row.elapsed_s === '') throw new Error('resources.csv 第 ' + (i + 2) + ' 行缺少 elapsed_s。');
-    const sample = { time: Number(row.elapsed_s) };
+    const sample: Record<string, number> = { time: Number(row.elapsed_s) };
     if (row.cpu_cores !== undefined && row.cpu_cores !== '') {
-      sample.cpu = Number(row.cpu_cores) * 100 / options.allocatedCores;
+      sample.cpu = Number(row.cpu_cores) * 100 / allocatedCores;
     }
     for (const [key, column] of Object.entries(RESOURCE_COLUMNS)) {
       if (row[column] !== undefined && row[column] !== '') sample[key] = Number(row[column]);
@@ -276,21 +292,21 @@ export function normalizeCaptureTables(resourcesCSV, phasesCSV, options = {}) {
   return canonical({ samples, stages: intervalsToStages(intervals), duration: options.duration, title: options.title });
 }
 
-function chromeTrace(document, events) {
+function chromeTrace(document: JsonRecord, events: unknown): Trace {
   if (!Array.isArray(events)) throw new Error('traceEvents 应为数组。');
-  const byTime = new Map();
-  const tracks = new Map();
-  const phases = [];
-  const resolveCache = new Map();
+  const byTime = new Map<number, Sample>();
+  const tracks = new Map<MetricKey, string>();
+  const phases: Interval[] = [];
+  const resolveCache = new Map<string, CounterSpec | null>();
   let firstTime = Infinity;
   let firstAbsoluteActivity = Infinity;
 
   for (const event of events) {
-    if (!event || typeof event !== 'object') continue;
-    if (event.ph !== 'M' && Number.isFinite(event.ts) && event.ts >= 1e12) {
+    if (!isRecord(event)) continue;
+    if (event.ph !== 'M' && typeof event.ts === 'number' && Number.isFinite(event.ts) && event.ts >= 1e12) {
       firstAbsoluteActivity = Math.min(firstAbsoluteActivity, event.ts);
     }
-    if (event.ph === 'X' && STAGE_NAMES.has(event.name)) {
+    if (event.ph === 'X' && typeof event.name === 'string' && STAGE_NAMES.has(event.name)) {
       const start = number(event.ts, event.name + '.ts');
       const duration = number(event.dur, event.name + '.dur');
       if (duration > 0) {
@@ -299,8 +315,8 @@ function chromeTrace(document, events) {
       }
       continue;
     }
-    if (event.ph !== 'C' || !event.args || typeof event.args !== 'object') continue;
-    const args = event.args.data && typeof event.args.data === 'object' ? event.args.data : event.args;
+    if (event.ph !== 'C' || !isRecord(event.args)) continue;
+    const args = isRecord(event.args.data) ? event.args.data : event.args;
     const fields = Object.keys(args);
     for (const field of fields) {
       const cacheKey = JSON.stringify([event.name, field, fields.length === 1]);
@@ -339,9 +355,9 @@ function chromeTrace(document, events) {
   return result;
 }
 
-export function normalizeTrace(json) {
+export function normalizeTrace(json: unknown): Trace {
   if (Array.isArray(json)) return chromeTrace({}, json);
-  if (!json || typeof json !== 'object') throw new Error('JSON 顶层应为对象或 Chrome Trace 事件数组。');
+  if (!isRecord(json)) throw new Error('JSON 顶层应为对象或 Chrome Trace 事件数组。');
   if (Object.hasOwn(json, 'samples')) return canonical(json);
   if (Object.hasOwn(json, 'traceEvents')) return chromeTrace(json, json.traceEvents);
   throw new Error('JSON 中未找到 samples 或 traceEvents。');

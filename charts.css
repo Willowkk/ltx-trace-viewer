@@ -10,7 +10,7 @@
   --lc-surface: #fff;
   --lc-blue: #0071e3;
   --lc-orange: #c55c14;
-  --lc-area-opacity: .065;
+  --lc-fill: rgba(0, 113, 227, .065);
   --lc-scrub: #49494f;
   --lc-chip: #29292d;
   --lc-chip-text: #fff;
@@ -31,7 +31,7 @@
   --lc-surface: #1c1c1e;
   --lc-blue: #5ba8ff;
   --lc-orange: #ff9f5c;
-  --lc-area-opacity: .1;
+  --lc-fill: rgba(91, 168, 255, .1);
   --lc-scrub: #c3c4cb;
   --lc-chip: #e8e8ed;
   --lc-chip-text: #171719;
@@ -118,17 +118,6 @@
 .lc-charts .lc-tick { fill: var(--lc-axis); }
 .lc-charts .lc-grid { stroke: var(--lc-grid); stroke-width: 1; }
 .lc-charts .lc-grid-x { stroke: var(--lc-grid-x); stroke-dasharray: 2 4; }
-.lc-charts .lc-baseline { stroke: var(--lc-floor); }
-.lc-charts .lc-area { fill: var(--lc-blue); opacity: var(--lc-area-opacity); pointer-events: none; }
-.lc-charts .lc-series,
-.lc-charts .lc-dot-series {
-  fill: none;
-  stroke-width: 1.65px;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-  pointer-events: none;
-}
-.lc-charts .lc-dot-series { stroke-width: 4px; }
 .lc-charts .lc-cursor,
 .lc-charts .lc-sample-dot,
 .lc-charts .lc-lane-light {
@@ -168,6 +157,7 @@
 .lc-charts .lc-stage-plot { position: relative; z-index: 1; transform: translateZ(0); }
 .lc-charts .lc-lane-light { top: 0; border-radius: 5px; background: var(--lc-lane-highlight); }
 .lc-charts .lc-empty { fill: var(--lc-muted); font-size: 13px; }
+.lc-charts .lc-empty-metric { position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); color: var(--lc-muted); pointer-events: none; }
 .lc-charts .lc-lane { cursor: pointer; }
 .lc-charts .lc-track { stroke: var(--lc-grid); stroke-width: 1px; }
 .lc-charts .lc-stage-name {

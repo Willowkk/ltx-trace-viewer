@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bindScrubber } from '../scrubber.js';
+import { bindScrubber } from '../scrubber.ts';
 
 function setup(t, callbacks = {}) {
   const frames = new Map();

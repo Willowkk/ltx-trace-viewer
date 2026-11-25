@@ -1,9 +1,17 @@
 // Pointer samples may arrive several times between paints. Only the newest x
 // is relevant; keyboard navigation and range changes can cancel queued input.
-export function bindScrubber(host, { surface = host, onPosition, onDragStart, hover = true }) {
+export function bindScrubber(host: HTMLElement, {
+  surface = host, onPosition, onDragStart, hover = true,
+}: {
+  surface?: Element;
+  onPosition: (fraction: number) => void;
+  onDragStart?: (fraction: number) => void;
+  hover?: boolean;
+}) {
   let frame = 0, pendingPageX = 0, pendingDragStart = false;
   let boundsValid = false, pageLeft = 0, width = 0;
-  let drag = null, suppressClick = false;
+  let drag: { id: number; x: number; moved: boolean } | null = null;
+  let suppressClick = false;
   const listeners = new AbortController();
   const options = { passive: true, signal: listeners.signal };
 
@@ -34,7 +42,7 @@ export function bindScrubber(host, { surface = host, onPosition, onDragStart, ho
     onPosition(fraction);
   }
 
-  function queue(pageX) {
+  function queue(pageX: number) {
     pendingPageX = pageX;
     if (!frame) frame = requestAnimationFrame(flush);
   }
@@ -46,7 +54,7 @@ export function bindScrubber(host, { surface = host, onPosition, onDragStart, ho
     drag = { id: event.pointerId, x: event.clientX, moved: false };
     // Capture on the original hit target so ordinary phase-button taps keep
     // their click target while a held drag can continue outside the chart.
-    if (event.isTrusted) event.target.setPointerCapture(event.pointerId);
+    if (event.isTrusted && event.target instanceof Element) event.target.setPointerCapture(event.pointerId);
     if (hover) queue(event.pageX);
   }, options);
 
@@ -66,7 +74,7 @@ export function bindScrubber(host, { surface = host, onPosition, onDragStart, ho
     suppressClick = drag.moved;
     drag = null;
   }, options);
-  function endDrag(event) {
+  function endDrag(event: PointerEvent) {
     if (event.pointerId !== drag?.id) return;
     drag = null;
     cancelFrame();
@@ -84,7 +92,7 @@ export function bindScrubber(host, { surface = host, onPosition, onDragStart, ho
   // ancestor inside the document can shift this surface relative to the page.
   window.addEventListener('scroll', event => {
     const scroller = event.target;
-    if (boundsValid && scroller !== window.document && scroller.contains?.(surface)) invalidateBounds();
+    if (boundsValid && scroller !== window.document && scroller && 'contains' in scroller && typeof scroller.contains === 'function' && scroller.contains(surface)) invalidateBounds();
   }, { ...options, capture: true });
   window.addEventListener('resize', invalidateBounds, options);
 

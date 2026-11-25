@@ -1,33 +1,51 @@
-import { demoTrace, normalizeTrace, REFERENCE_STAGES } from './data.js?v=2f0bb46e0f02';
-import { mountCharts, STAGE_COLORS } from './charts.js?v=0072673eaa6c';
-import { getCounterOptions, chooseCounterMapping } from './mapping.js?v=9b62a4be8092';
+import { demoTrace, normalizeTrace, REFERENCE_STAGES } from './data.ts';
+import { mountCharts, STAGE_COLORS } from './charts.ts';
+import { getCounterOptions, chooseCounterMapping } from './mapping.js';
+import { bindScrubber } from './scrubber.ts';
+import { readCaptureFiles } from './import-files.js';
+import { mountInspector } from './inspector.js';
 
-import { bindScrubber } from './scrubber.js?v=a9ac21ad2841';
-import { readCaptureFiles } from './import-files.js?v=a145b558ccaf';
-import { mountInspector } from './inspector.js?v=fa6828a0fd27';
+import { lowerBound, METRICS } from './model.ts';
+import type { MetricKey, Readings, Sample, Stage, TimeRange, Trace } from './model.ts';
+import './styles.css';
+import './inspector.css';
+import './charts.css';
+import './mapping.css';
 
-const byId = (id) => document.getElementById(id);
-const metrics = [
-  ['cpu', 'CPU', '%'], ['gpu', 'GPU', '%'],
-  ['rss', 'RSS', 'GiB'], ['vram', '显存', 'GiB'],
-  ['read', '读取', 'MiB/s'], ['write', '写入', 'MiB/s'],
-  ['rx', 'PCIe RX', 'MiB/s'], ['tx', 'PCIe TX', 'MiB/s'],
-];
+function byId<T extends HTMLElement = HTMLElement>(id: string): T {
+  const element = document.getElementById(id);
+  if (!element) throw new Error('缺少页面元素 ' + id);
+  return element as T;
+}
 const metricsFormat = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 });
-let dataset, focusedStage, sourceJson, failedFile, sourceFilename;
-let ribbonMarker, displayedSample, readings, stageInterval;
-const readingCache = new WeakMap();
+let dataset: Trace;
+let focusedStage: Stage | null = null;
+let sourceJson: unknown;
+let failedFile: { json: unknown; name: string } | null = null;
+let sourceFilename: string;
+let ribbonMarker: HTMLSpanElement | undefined;
+let displayedSample: Sample | null | undefined;
+let readings: Readings;
+let stageInterval: { start: number; end: number; active: Stage[]; label: string } | null = null;
+const readingCache = new WeakMap<Sample, Readings>();
 const cursorTime = byId('cursor-time');
 const cursorStage = byId('cursor-stage');
 const sampleTime = byId('sample-time');
 const stageRibbon = byId('ribbon');
-let range = [0, 1], importVersion = 0;
-const valueCells = new Map();
-const stageButtons = new Map();
-const ribbonButtons = new Map();
-const charts = mountCharts(byId('charts'), { onCursor: updateCursor, onStage: stage => { selectStage(stage); byId('scope-title').scrollIntoView({ block: 'start' }); } });
+let range: TimeRange = [0, 1];
+let importVersion = 0;
+const valueCells = new Map<MetricKey, HTMLSpanElement>();
+const stageButtons = new Map<Stage, HTMLButtonElement>();
+const ribbonButtons = new Map<Stage, HTMLButtonElement>();
+const charts = mountCharts(byId('charts'), {
+  onCursor: updateCursor,
+  onStage(stage) {
+    selectStage(stage);
+    byId('scope-title').scrollIntoView({ block: 'start' });
+  },
+});
 
-for (const [key, name, unit] of metrics) {
+for (const { key, name, unit } of METRICS) {
   const cell = document.createElement('div');
   cell.className = 'metric';
   const label = document.createElement('span');
@@ -48,23 +66,13 @@ for (const [key, name, unit] of metrics) {
 const setText = mountInspector(document.querySelector('.inspector'));
 
 // Only readings inside the displayed interval can appear in a stage detail.
-function lowerBound(samples, time) {
-  let low = 0, high = samples.length;
-  while (low < high) {
-    const mid = Math.floor((low + high) / 2);
-    if (samples[mid].time < time) low = mid + 1;
-    else high = mid;
-  }
-  return low;
-}
-
-function nearestSample(time) {
+function nearestSample(time: number): Sample | null {
   const rows = dataset.samples;
   const pos = lowerBound(rows, time);
   const before = rows[pos - 1];
   const after = rows[pos];
-  function inRange(row) {
-    return row && row.time >= range[0] && (focusedStage ? row.time < range[1] : row.time <= range[1]);
+  function inRange(row: Sample | undefined): row is Sample {
+    return !!row && row.time >= range[0] && (focusedStage ? row.time < range[1] : row.time <= range[1]);
   }
   if (!inRange(before)) return inRange(after) ? after : null;
   if (!inRange(after)) return before;
@@ -73,10 +81,10 @@ function nearestSample(time) {
 
 // Stage membership is constant between consecutive start/end boundaries.
 // Keep the same list there so the labels and highlighted rows can skip work.
-function stagesAt(time) {
+function stagesAt(time: number) {
   if (stageInterval && time >= stageInterval.start && time < stageInterval.end) return stageInterval;
   let start = -Infinity, end = Infinity;
-  const active = [];
+  const active: Stage[] = [];
   for (const stage of dataset.stages) {
     if (stage.start > time) {
       end = Math.min(end, stage.start);
@@ -92,15 +100,19 @@ function stagesAt(time) {
   return stageInterval;
 }
 
-function formatReadings(sample) {
-  if (sample && readingCache.has(sample)) return readingCache.get(sample);
-  const values = {};
-  for (const [key] of metrics) values[key] = Number.isFinite(sample?.[key]) ? metricsFormat.format(sample[key]) : '—';
+function formatReadings(sample: Sample | null): Readings {
+  const cached = sample && readingCache.get(sample);
+  if (cached) return cached;
+  const values = {} as Readings;
+  for (const { key } of METRICS) {
+    const value = sample?.[key];
+    values[key] = typeof value === 'number' && Number.isFinite(value) ? metricsFormat.format(value) : '—';
+  }
   if (sample) readingCache.set(sample, values);
   return values;
 }
 
-function updateCursor(time) {
+function updateCursor(time: number) {
   if (!dataset || !Number.isFinite(time)) return;
   const sample = nearestSample(time);
   const interval = stagesAt(time);
@@ -125,7 +137,7 @@ function updateCursor(time) {
   positionRibbonMarker();
 }
 
-function selectStage(stage, initializeCursor = true) {
+function selectStage(stage: Stage | null, initializeCursor = true) {
   focusedStage = stage;
   const wasMenuOpen = !byId('stage-menu').hidden;
   closeMenu(wasMenuOpen);
@@ -144,7 +156,11 @@ function selectStage(stage, initializeCursor = true) {
   }
 }
 
-function showData(data, fileName, json = null) {
+function hasCounters(json: unknown): boolean {
+  return getCounterOptions(json).length > 0;
+}
+
+function showData(data: Trace, fileName: string, json: unknown = null) {
   ribbonInput.reset();
   dataset = data;
   stageInterval = null;
@@ -153,7 +169,7 @@ function showData(data, fileName, json = null) {
   sourceFilename = fileName;
   failedFile = null;
   const isDemo = json === null;
-  const count = metrics.filter(([key]) => data.samples.some(row => Number.isFinite(row[key]))).length;
+  const count = METRICS.filter(({ key }) => data.samples.some(row => Number.isFinite(row[key]))).length;
   const sourceType = isDemo ? '模拟示例' : '本地采集';
   byId('source-type').textContent = sourceType + ' · ' + count + '/8 项资源指标'
     + (data.timeBasis === 'trace' ? ' · 以 Trace 起点计时' : '');
@@ -161,7 +177,7 @@ function showData(data, fileName, json = null) {
   byId('source-name').title = fileName;
   byId('reset-demo').hidden = isDemo;
   byId('apply-reference').hidden = isDemo || data.stages.length > 0;
-  byId('edit-mapping').hidden = !json || !(Array.isArray(json) || Array.isArray(json.traceEvents)) || !getCounterOptions(json).length;
+  byId('edit-mapping').hidden = !hasCounters(json);
   byId('duration').textContent = data.duration.toFixed(2);
   byId('sample-count').textContent = data.samples.length.toLocaleString('zh-CN');
   byId('stage-count').textContent = String(data.stages.length);
@@ -189,11 +205,11 @@ function showData(data, fileName, json = null) {
     byId('stages').append(button);
   }
   buildRibbon(data);
-  byId('phase-toggle').disabled = !data.stages.length;
+  byId<HTMLButtonElement>('phase-toggle').disabled = !data.stages.length;
   selectStage(null);
 }
 
-const shortNames = {
+const shortNames: Record<string, string> = {
   'runtime.import_torch': 'Torch', 'runtime.import_pipeline': 'Pipeline',
   'prompt.encode': '文本编码', 'diffusion.1': '首次去噪', 'video.spatial_upsample': '上采样',
   'diffusion.2': '二次去噪', 'video.decode': '视频解码', 'audio.decode': '音频解码'
@@ -210,7 +226,7 @@ new ResizeObserver(([entry]) => {
   positionRibbonMarker();
 }).observe(stageRibbon);
 
-function buildRibbon(data) {
+function buildRibbon(data: Trace) {
   const ribbon = byId('ribbon');
   ribbon.replaceChildren();
   ribbonButtons.clear();
@@ -268,16 +284,16 @@ byId('phase-toggle').addEventListener('click', () => {
   byId('stage-menu').hidden = false;
   byId('phase-toggle').setAttribute('aria-expanded', 'true');
   const buttons = Array.from(stageButtons.values());
-  (stageButtons.get(focusedStage) || buttons[0])?.focus();
+  ((focusedStage && stageButtons.get(focusedStage)) || buttons[0])?.focus();
 });
 document.addEventListener('pointerdown', event => {
-  if (!event.target.closest('.picker-anchor') && !byId('stage-menu').hidden) closeMenu();
+  if (event.target instanceof Element && !event.target.closest('.picker-anchor') && !byId('stage-menu').hidden) closeMenu();
 });
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !byId('stage-menu').hidden) closeMenu(true);
 });
 const media = window.matchMedia('(prefers-color-scheme: dark)');
-let theme;
+let theme: string | null = null;
 try { theme = localStorage.getItem('ltx-appearance'); } catch { /* storage is optional */ }
 function updateTheme() {
   const dark = theme ? theme === 'dark' : media.matches;
@@ -306,12 +322,13 @@ function resetDemo() {
   notify();
 }
 
-async function importFiles(files) {
+async function importFiles(files: File[]) {
   if (!files?.length) return;
   const version = ++importVersion;
   failedFile = null;
   notify('正在读取文件…');
-  let json, name;
+  let json: unknown;
+  let name = '';
   try {
     const loaded = await readCaptureFiles(files);
     if (version !== importVersion) return;
@@ -321,13 +338,13 @@ async function importFiles(files) {
     notify();
   } catch (error) {
     if (version !== importVersion) return;
-    const canMap = !!json && (Array.isArray(json) || Array.isArray(json.traceEvents)) && getCounterOptions(json).length > 0;
+    const canMap = hasCounters(json);
     if (canMap) failedFile = { json, name };
-    notify('导入失败 · ' + error.message, canMap);
+    notify('导入失败 · ' + (error instanceof Error ? error.message : String(error)), canMap);
   }
 }
 
-async function mapFile(json, fileName) {
+async function mapFile(json: unknown, fileName: string) {
   const version = ++importVersion;
   try {
     const mapped = await chooseCounterMapping(json);
@@ -335,7 +352,8 @@ async function mapFile(json, fileName) {
     showData(mapped, fileName, json);
     notify();
   } catch (error) {
-    notify('匹配失败 · ' + error.message, !!failedFile);
+    if (version !== importVersion) return;
+    notify('匹配失败 · ' + (error instanceof Error ? error.message : String(error)), !!failedFile);
   }
 }
 
@@ -346,23 +364,24 @@ byId('apply-reference').addEventListener('click', () => {
     return;
   }
   const name = sourceFilename;
-  showData({ ...dataset, stages: REFERENCE_STAGES }, name, sourceJson);
+  showData({ ...dataset, stages: [...REFERENCE_STAGES] }, name, sourceJson);
   notify('已按截图给出的起止时间标注八个阶段。');
 });
 
 byId('overview-button').addEventListener('click', () => selectStage(null));
 byId('retry-mapping').addEventListener('click', () => { if (failedFile) mapFile(failedFile.json, failedFile.name); });
 byId('edit-mapping').addEventListener('click', () => mapFile(sourceJson, sourceFilename));
-byId('import-button').addEventListener('click', () => byId('file').click());
-byId('file').addEventListener('change', event => {
-  const files = Array.from(event.target.files);
-  event.target.value = '';
+const fileInput = byId<HTMLInputElement>('file');
+byId('import-button').addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  const files = Array.from(fileInput.files ?? []);
+  fileInput.value = '';
   importFiles(files);
 });
 byId('reset-demo').addEventListener('click', resetDemo);
 
 let dragDepth = 0;
-const hasFiles = event => Array.from(event.dataTransfer?.types || []).includes('Files');
+const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types || []).includes('Files');
 window.addEventListener('dragenter', event => {
   if (!hasFiles(event)) return;
   event.preventDefault();
@@ -379,11 +398,11 @@ window.addEventListener('drop', event => {
   event.preventDefault();
   dragDepth = 0;
   byId('drop-layer').hidden = true;
-  importFiles(Array.from(event.dataTransfer.files));
+  importFiles(Array.from(event.dataTransfer?.files ?? []));
 });
 
-byId('help-button').addEventListener('click', () => byId('help').showModal());
-byId('close-help').addEventListener('click', () => byId('help').close());
+byId('help-button').addEventListener('click', () => byId<HTMLDialogElement>('help').showModal());
+byId('close-help').addEventListener('click', () => byId<HTMLDialogElement>('help').close());
 byId('download-demo').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(demoTrace())], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -394,14 +413,14 @@ byId('download-demo').addEventListener('click', () => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 
-const embedded = byId('embedded-capture');
+const embedded = document.getElementById('embedded-capture');
 if (embedded) {
   try {
     const json = JSON.parse(embedded.textContent);
     showData(normalizeTrace(json), json.title || '本地采集', json);
   } catch (error) {
     resetDemo();
-    notify('内嵌数据读取失败 · ' + error.message);
+    notify('内嵌数据读取失败 · ' + (error instanceof Error ? error.message : String(error)));
   }
 } else {
   resetDemo();

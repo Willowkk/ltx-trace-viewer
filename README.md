@@ -1,8 +1,8 @@
-# LTX 推理时间线
+# LTX 推理时间线 · uPlot 预览
 
-[打开交互网页](https://willowkk.github.io/ltx-trace-viewer/)
+`preview/uplot` 分支用 uPlot 和 Canvas 绘制四张资源曲线，第五张图显示 LTX 各阶段的起止时间。五张图共享游标，可在同一时刻对照 CPU/GPU、内存、存储和 PCIe 读数。页面用 TypeScript 与 Vite 构建，导入的文件在本机浏览器内解析。
 
-在同一条时间轴上查看 CPU/GPU 利用率、主机内存与显存、存储读写、PCIe 收发，以及 LTX 的阶段区间。网页完全在本地浏览器内解析所选文件，无需账号或后端。首页的资源曲线由程序生成，标有「模拟示例」。
+公开示例的资源读数由程序生成，页面标为「模拟示例」。可以把同一次真实采集分别导入本分支和线上主版本，直接对照拖动体验。[打开 main 分支网页](https://willowkk.github.io/ltx-trace-viewer/)
 
 ## 使用
 
@@ -57,10 +57,28 @@
 
 内置的八个阶段为 `runtime.import_torch`、`runtime.import_pipeline`、`prompt.encode`、`diffusion.1`、`video.spatial_upsample`、`diffusion.2`、`video.decode`、`audio.decode`。
 
-## 本地运行
+## 运行预览分支
 
-在仓库目录执行 `python3 -m http.server 8000`，打开 [本地网页](http://localhost:8000/)。项目使用原生浏览器 ES 模块，无需安装前端依赖。使用 Node.js 22+ 运行 `npm test` 可检查解析与字段映射。
+使用 Node.js 22.19 或更高版本。在仓库目录执行以下命令，打开终端显示的本地地址。
 
-本机装有 Chrome 时，运行 `npm ci` 和 `npm run test:browser` 可复测局部视图中鼠标经过标题、图例和图间空白时的五图联动。
+```sh
+git switch preview/uplot
+npm ci
+npm run dev
+```
 
-发布网页改动前运行 `npm run version-assets`。它按内容更新入口、样式表和各层模块的资源地址，使已访问过网页的浏览器也能加载配套版本。
+在生产构建上检查效果可运行 `npm run build` 和 `npm run preview`。运行 `npm test` 检查解析、字段映射和游标事件。本机装有 Chrome 时，`npm run test:browser` 会构建并启动网页，检查五图联动等交互。
+
+### 导出可离线双击的 HTML
+
+先运行一次 `npm run build`，再使用以下命令之一。输出的单个 HTML 包含页面、图表库和样式，双击即可查看，也可在离线页面中继续导入其他采集。
+
+```sh
+# 使用公开的模拟数据
+node scripts/standalone.mjs --output dist/ltx-preview.html
+
+# 打开时直接显示指定的本地采集
+node scripts/standalone.mjs --output dist/my-capture.html --capture "/path/to/capture.json"
+```
+
+`--capture` 接受通用 JSON 或可自动识别资源计数器的 Chrome Trace JSON。生成的 HTML 包含所选 JSON 的全部内容，分享该文件也会分享这次采集。默认输出目录 `dist/` 已加入 Git 忽略规则。

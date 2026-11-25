@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: './tests/browser',
   use: { channel: 'chrome', baseURL: 'http://127.0.0.1:4173' },
   webServer: {
-    command: 'python3 -m http.server 4173 --bind 127.0.0.1',
+    command: 'npm run build && npm run preview -- --port 4173 --strictPort',
     url: 'http://127.0.0.1:4173',
   },
 });

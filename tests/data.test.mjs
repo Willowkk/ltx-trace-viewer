@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { counterField, demoTrace, normalizeCaptureTables, normalizeTrace, REFERENCE_STAGES } from '../data.js';
+import { counterField, demoTrace, normalizeCaptureTables, normalizeTrace, REFERENCE_STAGES } from '../data.ts';
 
 test('canonical input orders samples, aligns split rows, preserves gaps and recorded custom stages', () => {
   const data = normalizeTrace({

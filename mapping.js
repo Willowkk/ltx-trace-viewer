@@ -1,11 +1,5 @@
-import { counterField, normalizeTrace } from './data.js?v=2f0bb46e0f02';
-
-const metrics = [
-  ['cpu', '进程 CPU（按分配核归一化）', 'percent'], ['gpu', 'GPU 利用率', 'percent'],
-  ['rss', '进程 RSS', 'size'], ['vram', '设备显存', 'size'],
-  ['read', '存储读取', 'rate'], ['write', '存储写入', 'rate'],
-  ['rx', 'PCIe RX', 'rate'], ['tx', 'PCIe TX', 'rate'],
-];
+import { counterField, normalizeTrace } from './data.ts';
+import { METRICS } from './model.ts';
 
 const units = {
   percent: [
@@ -76,7 +70,7 @@ export function getCounterOptions(json) {
 export function applyCounterMapping(json, bindings) {
   const byTrack = new Map();
   const selected = new Set();
-  for (const [key, , group] of metrics) {
+  for (const { key, kind: group } of METRICS) {
     const binding = bindings[key];
     if (!binding?.source) continue;
     const { source, unit } = binding;
@@ -141,6 +135,7 @@ function selectFor(label, choices) {
   return select;
 }
 
+/** @returns {Promise<import('./model.ts').Trace | null>} */
 export async function chooseCounterMapping(json) {
   const options = getCounterOptions(json);
   if (!options.length) throw new Error('未找到含数值字段的 Chrome Trace 计数器（ph="C"）。');
@@ -157,7 +152,7 @@ export async function chooseCounterMapping(json) {
   grid.className = 'counter-fields';
   const controls = new Map();
   const optionEntries = options.map((source, i) => [String(i), source.label]);
-  for (const [key, label, group] of metrics) {
+  for (const { key, mappingName: label, kind: group } of METRICS) {
     const row = element('div');
     row.className = 'counter-row';
     const name = element('label', label);
