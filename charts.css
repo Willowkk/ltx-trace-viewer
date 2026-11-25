@@ -1,0 +1,113 @@
+.lc-charts {
+  --lc-ink: #162b3c;
+  --lc-muted: #536879;
+  --lc-grid: #dce5ec;
+  --lc-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  container-type: inline-size;
+  min-width: 0;
+}
+.lc-charts .lc-panel {
+  margin: 0;
+  padding: 13px 0 3px;
+  min-width: 0;
+  border-top: 1px solid var(--lc-grid);
+  background: #fff;
+}
+.lc-charts .lc-head, .lc-charts .lc-title-group, .lc-charts .lc-legend,
+.lc-charts .lc-legend-item {
+  display: flex;
+  align-items: center;
+}
+.lc-charts .lc-head {
+  min-height: 22px;
+  margin: 0 16px 5px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  column-gap: 12px;
+  row-gap: 4px;
+}
+.lc-charts .lc-title-group { gap: 8px; }
+.lc-charts .lc-title {
+  color: var(--lc-ink);
+  margin: 0;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.4;
+  font-weight: 650;
+}
+.lc-charts .lc-unit {
+  border: 1px solid #dce4ea;
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: #506374;
+  font: 11px/1.25 var(--lc-mono);
+}
+.lc-charts .lc-legend {
+  min-height: 20px;
+  gap: 12px;
+  color: var(--lc-muted);
+  font-size: 12px;
+}
+.lc-charts .lc-legend-item { gap: 4px; white-space: nowrap; }
+.lc-charts .lc-line-key { display: inline-block; width: 13px; height: 3px; border-radius: 2px; }
+.lc-charts .lc-legend-value {
+  color: var(--lc-ink);
+  font: 600 12px/1.3 var(--lc-mono);
+  font-variant-numeric: tabular-nums;
+}
+.lc-charts .lc-legend-value:empty { display: none; }
+.lc-charts .lc-phase-hint { color: var(--lc-muted); font-size: 12px; }
+.lc-charts .lc-plot {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: pan-y;
+  user-select: none;
+}
+.lc-charts .lc-plot:focus-visible { outline: 2px solid #2863da; outline-offset: -2px; }
+.lc-charts .lc-tick, .lc-charts .lc-cursor text {
+  font: 11px var(--lc-mono);
+  font-variant-numeric: tabular-nums;
+}
+.lc-charts .lc-tick { fill: #607384; }
+.lc-charts .lc-grid { stroke: var(--lc-grid); stroke-width: 0.8px; }
+.lc-charts .lc-grid-x { stroke-dasharray: 2 3; }
+.lc-charts .lc-series, .lc-charts .lc-dot-series {
+  fill: none;
+  stroke-width: 1.7px;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+.lc-charts .lc-dot-series { stroke-width: 4px; }
+.lc-charts .lc-cursor { pointer-events: none; }
+.lc-charts .lc-crosshair { stroke: #172f47; stroke-width: 1px; stroke-dasharray: 4 3; }
+.lc-charts .lc-cursor rect { fill: #21394b; }
+.lc-charts .lc-cursor text { fill: #fff; }
+.lc-charts .lc-empty { fill: var(--lc-muted); font-size: 12px; }
+.lc-charts .lc-lane { cursor: pointer; }
+.lc-charts .lc-track { stroke: #dfe7ed; stroke-width: 1px; }
+.lc-charts .lc-stage-name {
+  fill: #3b5061;
+  font-family: inherit;
+  font-size: 12px;
+  paint-order: stroke;
+  stroke: white;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.lc-charts .lc-stage-name.lc-inside {
+  fill: #fff;
+  stroke-width: 0;
+}
+.lc-charts .lc-lane.lc-active .lc-lane-hit { fill: #edf3fa; }
+.lc-charts .lc-lane:focus-visible { outline: none; }
+.lc-charts .lc-lane:focus-visible .lc-lane-hit { stroke: #2863da; stroke-width: 1.5px; }
+@media (max-width: 600px) {
+  .lc-charts .lc-head { margin-left: 10px; margin-right: 10px; }
+  .lc-charts .lc-legend { gap: 9px; }
+}
+@container (max-width: 550px) {
+  .lc-charts .lc-legend { flex-basis: 100%; }
+}

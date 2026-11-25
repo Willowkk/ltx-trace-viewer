@@ -1,0 +1,6 @@
+{
+  "name": "ltx-trace-viewer",
+  "private": true,
+  "type": "module",
+  "scripts": {"test": "node --test"}
+}

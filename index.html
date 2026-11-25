@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="在同一条时间轴上联动查看 LTX 推理阶段、计算、内存、存储和 PCIe 采样。">
+  <title>LTX 推理时间线 · Trace Studio</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="charts.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="mast-inner">
+      <div class="brand"><img src="icon.svg" alt="" width="30" height="30"><span>Trace Studio</span></div>
+      <div class="mast-actions">
+        <button id="help-button" class="btn secondary">格式说明</button>
+        <button id="import-button" class="btn primary"><span class="upload-icon" aria-hidden="true">↥</span>导入 JSON</button>
+        <input id="file" type="file" accept=".json,.gz,application/json,application/gzip" hidden>
+      </div>
+    </div>
+  </header>
+  <main class="workspace">
+    <section class="summary" aria-labelledby="page-title">
+      <div class="summary-title">
+        <div class="source-line"><span class="source-badge" id="source-type">模拟示例</span><span id="source-name">LTX-2.5</span></div>
+        <h1 id="page-title">LTX 推理时间线</h1>
+      </div>
+      <dl class="stats">
+        <div><dt>采集时长</dt><dd><span id="duration">—</span><small> s</small></dd></div>
+        <div><dt>采样点</dt><dd id="sample-count">—</dd></div>
+        <div><dt>推理阶段</dt><dd id="stage-count">—</dd></div>
+      </dl>
+    </section>
+    <div class="notice" id="notice" role="status" hidden><span id="notice-text"></span><button id="retry-mapping" class="text-btn" hidden>手动匹配指标</button></div>
+    <div class="layout">
+      <aside class="sidebar">
+        <nav class="side-card" aria-label="推理阶段">
+          <div class="side-head"><h2>阶段导航</h2><span class="unit">秒</span></div>
+          <button id="overview-button" class="stage-button all-button"><span class="all-icon" aria-hidden="true">▦</span><span>全程总览</span></button>
+          <div id="stages"></div>
+        </nav>
+        <div class="sidebar-actions">
+          <button class="text-btn" id="apply-reference" hidden>套用参考八阶段</button>
+          <button class="text-btn" id="edit-mapping" hidden>匹配指标字段</button>
+          <button class="text-btn" id="reset-demo" hidden>重新打开模拟示例</button>
+        </div>
+      </aside>
+      <section class="plot-area" aria-labelledby="scope-title">
+        <div class="scope-head"><div><h2 id="scope-title">全程总览</h2><p id="scope-caption">移动游标可同时查看各图在同一时刻的读数。</p></div><span id="scope-range"></span></div>
+        <section class="inspector" aria-label="联动游标读数">
+          <div class="cursor-info">
+            <div class="cursor-key"><span aria-hidden="true" class="cross-icon">⊹</span>联动游标</div>
+            <strong id="cursor-time">—</strong><span id="cursor-stage">移入图表查看</span><span id="sample-time"></span>
+          </div>
+          <div class="values" id="values"></div>
+        </section>
+        <div id="charts"></div>
+      </section>
+    </div>
+  </main>
+  <dialog id="help" class="help-dialog">
+    <div class="dialog-head"><h2>导入时间线</h2><button id="close-help" class="close" aria-label="关闭">×</button></div>
+    <p>点击「导入 JSON」或把文件拖入页面。文件在本机浏览器中解析。</p>
+    <h3>Chrome Trace</h3>
+    <p>支持包含阶段事件与资源计数器的 <code>.json</code> 和 <code>.json.gz</code>。可直接选择合并后的阶段与资源时间轴。导入后可手动匹配自定义计数器和单位。</p>
+    <h3>通用 JSON</h3>
+    <p><code>time</code>、<code>start</code>、<code>end</code> 以采集启动为零点，单位为秒。CPU / GPU 用百分比，内存用 GiB，存储和 PCIe 速率用 MiB/s。缺测可以省略或填 <code>null</code>。</p>
+    <pre><code>{
+  "samples": [
+    {"time": 0, "cpu": 12, "gpu": 0, "rss": 1.5},
+    {"time": 1, "cpu": 28, "gpu": 65, "rss": 2.1}
+  ],
+  "stages": [
+    {"id": "prompt.encode", "start": 0, "end": 1}
+  ]
+}</code></pre>
+    <button id="download-demo" class="btn secondary">下载完整示例 JSON</button>
+  </dialog>
+  <div id="drop-layer" hidden>松开以导入时间线</div>
+  <noscript>请启用 JavaScript 以查看联动图表。</noscript>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
