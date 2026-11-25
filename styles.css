@@ -76,7 +76,7 @@ h1 { font-size:clamp(28px,3.3vw,42px); font-weight:660; letter-spacing:-.05em; l
 .stage-duration,.stage-id { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums }
 .stage-id { display:block; margin-top:2px; overflow-wrap:anywhere }
 .analysis-layout { display:grid; grid-template-columns:minmax(0,1fr) clamp(226px,21%,278px); gap:16px; align-items:start }
-.plot-area { min-width:0; padding:3px 12px 8px }
+.plot-area { min-width:0; padding:3px 12px 8px; cursor:crosshair; touch-action:pan-y; -webkit-user-select:none; user-select:none }
 .inspector { position:sticky; top:12px; min-width:0; padding:20px; contain:layout }
 .inspector-head { gap:7px }
 .inspector h2 { font-size:16px; line-height:1.25; font-weight:610; letter-spacing:-.02em }

@@ -1,4 +1,4 @@
-import { bindScrubber } from './scrubber.js?v=525bef86689b';
+import { bindScrubber } from './scrubber.js?v=a9ac21ad2841';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const PLOTS = [
@@ -415,9 +415,9 @@ export function mountCharts(container, { onCursor, onStage }) {
   const appearance = new MutationObserver(updateInk);
   appearance.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   const emptyStages = [];
-  const input = bindScrubber(container, {
-    // All five frames have the exact same horizontal bounds.
-    surfaceFor: target => target.closest('.lc-plot') ? container : null,
+  // Headers, legends and the space between plots share the plots' time axis.
+  const input = bindScrubber(container.closest('.plot-area') || container, {
+    surface: container,
     onPosition(fraction) {
       const { left, right } = view.layout;
       onCursor(range[0] + clamp((fraction * width - left) / (right - left), 0, 1) * (range[1] - range[0]));

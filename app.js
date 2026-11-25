@@ -1,8 +1,8 @@
 import { demoTrace, normalizeTrace, REFERENCE_STAGES } from './data.js?v=2f0bb46e0f02';
-import { mountCharts, STAGE_COLORS } from './charts.js?v=a5aa5c0de9d3';
+import { mountCharts, STAGE_COLORS } from './charts.js?v=0072673eaa6c';
 import { getCounterOptions, chooseCounterMapping } from './mapping.js?v=9b62a4be8092';
 
-import { bindScrubber } from './scrubber.js?v=525bef86689b';
+import { bindScrubber } from './scrubber.js?v=a9ac21ad2841';
 import { readCaptureFiles } from './import-files.js?v=a145b558ccaf';
 import { mountInspector } from './inspector.js?v=fa6828a0fd27';
 
@@ -248,7 +248,6 @@ function buildRibbon(data) {
 }
 
 const ribbonInput = bindScrubber(stageRibbon, {
-  surfaceFor: () => stageRibbon,
   hover: false,
   onDragStart() {
     if (focusedStage) selectStage(null, false);

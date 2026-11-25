@@ -4,6 +4,10 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
+    "test:browser": "playwright test",
     "version-assets": "node scripts/version-assets.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1"
   }
 }

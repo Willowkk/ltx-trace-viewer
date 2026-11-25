@@ -18,7 +18,7 @@ function setup(t, callbacks = {}) {
     getBoundingClientRect() { reads++; return { left: pageLeft - window.scrollX, width: 100 }; },
   };
   const positions = [];
-  const input = bindScrubber(host, { surfaceFor: () => surface, onPosition: x => positions.push(x), ...callbacks });
+  const input = bindScrubber(host, { surface, onPosition: x => positions.push(x), ...callbacks });
   t.after(() => {
     input.destroy();
     for (const [name, previous] of Object.entries(saved)) {
