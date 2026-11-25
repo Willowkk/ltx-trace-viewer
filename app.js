@@ -1,5 +1,5 @@
 import { demoTrace, normalizeTrace, REFERENCE_STAGES } from './data.js';
-import { mountCharts, STAGE_COLORS } from './charts.js';
+import { mountCharts, STAGE_COLORS } from './charts.js?v=546ce96';
 import { getCounterOptions, chooseCounterMapping } from './mapping.js';
 
 import { bindScrubber } from './scrubber.js';
