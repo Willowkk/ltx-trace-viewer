@@ -1,4 +1,4 @@
-import { normalizeCaptureTables } from './data.js';
+import { normalizeCaptureTables } from './data.js?v=2f0bb46e0f02';
 
 let sequence = 0;
 let coreDialog = null;

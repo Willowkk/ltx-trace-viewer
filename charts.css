@@ -70,8 +70,8 @@
   font: 450 12px/1.4 var(--lc-ui);
 }
 .lc-charts .lc-unit { letter-spacing: .01em; }
-.lc-charts .lc-legend { gap: 16px; }
-.lc-charts .lc-legend-item { gap: 5px; white-space: nowrap; }
+.lc-charts .lc-legend { gap: 16px; min-width: 0; max-width: 100%; transform: translateZ(0); contain: layout; }
+.lc-charts .lc-legend-item { min-width: 0; gap: 5px; white-space: nowrap; }
 .lc-charts .lc-line-key {
   display: inline-block;
   flex: none;
@@ -79,24 +79,24 @@
   height: 7px;
   border-radius: 50%;
 }
-.lc-charts .lc-legend-value {
+.lc-charts .lc-legend-slot {
+  position: relative;
+  min-width: 1ch;
   color: var(--lc-ink);
   font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.lc-charts .lc-legend-value:empty { display: none; }
-.lc-charts .lc-frame { position: relative; }
-.lc-charts .lc-overlay {
+.lc-charts .lc-legend-slot::before { content: attr(data-reserve); visibility: hidden; }
+.lc-charts .lc-legend-value {
+  width: 100%; height: 100%;
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
   overflow: hidden;
-  pointer-events: none;
+  text-overflow: ellipsis;
   contain: strict;
-  transform: translateZ(0);
 }
+.lc-charts .lc-frame { position: relative; isolation: isolate; overflow: hidden; }
 .lc-charts .lc-plot {
   display: block;
   width: 100%;
@@ -111,8 +111,7 @@
   outline-offset: -2px;
   border-radius: 7px;
 }
-.lc-charts .lc-tick,
-.lc-charts .lc-cursor text {
+.lc-charts .lc-tick {
   font: 450 11px var(--lc-ui);
   font-variant-numeric: tabular-nums;
 }
@@ -130,10 +129,44 @@
   pointer-events: none;
 }
 .lc-charts .lc-dot-series { stroke-width: 4px; }
-.lc-charts .lc-cursor { pointer-events: none; }
-.lc-charts .lc-crosshair { stroke: var(--lc-scrub); stroke-width: 1px; }
-.lc-charts .lc-cursor rect { fill: var(--lc-chip); }
-.lc-charts .lc-cursor text { font-weight: 600; fill: var(--lc-chip-text); }
+.lc-charts .lc-cursor,
+.lc-charts .lc-sample-dot,
+.lc-charts .lc-lane-light {
+  position: absolute;
+  pointer-events: none;
+  will-change: transform;
+}
+.lc-charts .lc-cursor {
+  left: 0;
+  width: 1px;
+  z-index: 2;
+  background: var(--lc-scrub);
+}
+.lc-charts .lc-cursor-time {
+  position: absolute;
+  top: calc(100% + 1px);
+  height: 19px;
+  border-radius: 6px;
+  contain: strict;
+  overflow: hidden;
+  white-space: nowrap;
+  background: var(--lc-chip);
+  color: var(--lc-chip-text);
+  text-align: center;
+  font: 600 11px/19px var(--lc-ui);
+  font-variant-numeric: tabular-nums;
+}
+.lc-charts .lc-sample-dot {
+  left: -4.7px;
+  top: -4.7px;
+  width: 9.4px;
+  height: 9.4px;
+  z-index: 2;
+  border: 1.8px solid var(--lc-surface);
+  border-radius: 50%;
+}
+.lc-charts .lc-stage-plot { position: relative; z-index: 1; transform: translateZ(0); }
+.lc-charts .lc-lane-light { top: 0; border-radius: 5px; background: var(--lc-lane-highlight); }
 .lc-charts .lc-empty { fill: var(--lc-muted); font-size: 13px; }
 .lc-charts .lc-lane { cursor: pointer; }
 .lc-charts .lc-track { stroke: var(--lc-grid); stroke-width: 1px; }
@@ -146,12 +179,13 @@
   stroke-linejoin: round;
 }
 .lc-charts .lc-stage-name.lc-inside { fill: white; stroke-width: 0; }
-.lc-charts .lc-lane.lc-active .lc-lane-hit,
-.lc-charts .lc-lane:hover .lc-lane-hit { fill: var(--lc-lane-highlight); }
 .lc-charts .lc-lane:focus-visible { outline: none; }
 .lc-charts .lc-lane:focus-visible .lc-lane-hit { stroke: var(--lc-blue); stroke-width: 1.5px; }
 @container (max-width: 540px) {
   .lc-charts .lc-panel { padding-block: 12px 6px; }
   .lc-charts .lc-head { margin-inline: 12px; }
   .lc-charts .lc-legend { flex-basis: 100%; min-height: 18px; gap: 12px; }
+}
+@container (max-width: 390px) {
+  .lc-charts .lc-legend-slot::before { content: attr(data-number-reserve); }
 }

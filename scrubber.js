@@ -1,8 +1,8 @@
 // Pointer samples may arrive several times between paints. Only the newest x
 // is relevant; keyboard navigation and range changes can cancel queued input.
 export function bindScrubber(host, { surfaceFor, onPosition, onDragStart, hover = true }) {
-  let frame = 0, pendingSurface = null, pendingX = 0;
-  let measuredSurface = null, bounds;
+  let frame = 0, pendingSurface = null, pendingPageX = 0, pendingDragStart = false;
+  let measuredSurface = null, pageLeft = 0, width = 0;
   let drag = null, suppressClick = false;
   const listeners = new AbortController();
   const options = { passive: true, signal: listeners.signal };
@@ -15,23 +15,31 @@ export function bindScrubber(host, { surfaceFor, onPosition, onDragStart, hover 
     cancelAnimationFrame(frame);
     frame = 0;
     pendingSurface = null;
+    pendingDragStart = false;
   }
 
   function flush() {
     frame = 0;
     const surface = pendingSurface;
+    const startingDrag = pendingDragStart;
     pendingSurface = null;
+    pendingDragStart = false;
     if (!surface || !surface.isConnected) return;
     if (surface !== measuredSurface) {
-      bounds = surface.getBoundingClientRect();
+      const bounds = surface.getBoundingClientRect();
+      pageLeft = bounds.left + window.scrollX;
+      width = bounds.width;
       measuredSurface = surface;
     }
-    if (bounds.width > 0) onPosition((pendingX - bounds.left) / bounds.width);
+    if (width <= 0) return;
+    const fraction = (pendingPageX - pageLeft) / width;
+    if (startingDrag) onDragStart?.(fraction);
+    onPosition(fraction);
   }
 
-  function queue(surface, clientX) {
+  function queue(surface, pageX) {
     pendingSurface = surface;
-    pendingX = clientX;
+    pendingPageX = pageX;
     if (!frame) frame = requestAnimationFrame(flush);
   }
 
@@ -45,7 +53,7 @@ export function bindScrubber(host, { surfaceFor, onPosition, onDragStart, hover 
     // Capture on the original hit target so ordinary phase-button taps keep
     // their click target while a held drag can continue outside the chart.
     if (event.isTrusted) event.target.setPointerCapture(event.pointerId);
-    if (hover) queue(surface, event.clientX);
+    if (hover) queue(surface, event.pageX);
   }, options);
 
   host.addEventListener('pointermove', event => {
@@ -55,19 +63,21 @@ export function bindScrubber(host, { surfaceFor, onPosition, onDragStart, hover 
     if (!surface) return;
     if (drag && !drag.moved && Math.abs(event.clientX - drag.x) >= 4) {
       drag.moved = true;
-      onDragStart?.();
+      pendingDragStart = true;
     }
-    if (hover || drag?.moved) queue(surface, event.clientX);
+    if (hover || drag?.moved) queue(surface, event.pageX);
   }, options);
 
   host.addEventListener('pointerup', event => {
     if (!drag || event.pointerId !== drag.id) return;
-    if (hover || drag.moved) queue(drag.surface, event.clientX);
+    if (hover || drag.moved) queue(drag.surface, event.pageX);
     suppressClick = drag.moved;
     drag = null;
   }, options);
   function endDrag(event) {
-    if (event.pointerId === drag?.id) drag = null;
+    if (event.pointerId !== drag?.id) return;
+    drag = null;
+    cancelFrame();
   }
   host.addEventListener('pointercancel', endDrag, options);
   host.addEventListener('lostpointercapture', endDrag, options);
@@ -78,7 +88,12 @@ export function bindScrubber(host, { surfaceFor, onPosition, onDragStart, hover 
     }
     suppressClick = false;
   }, { capture: true, signal: listeners.signal });
-  window.addEventListener('scroll', invalidateBounds, { ...options, capture: true });
+  // Both pointer and bounds are in document coordinates. Only scrolling an
+  // ancestor inside the document can shift this surface relative to the page.
+  window.addEventListener('scroll', event => {
+    const scroller = event.target;
+    if (measuredSurface && scroller !== window.document && scroller.contains?.(measuredSurface)) invalidateBounds();
+  }, { ...options, capture: true });
   window.addEventListener('resize', invalidateBounds, options);
 
   return {

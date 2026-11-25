@@ -1,4 +1,4 @@
-import { counterField, normalizeTrace } from './data.js';
+import { counterField, normalizeTrace } from './data.js?v=2f0bb46e0f02';
 
 const metrics = [
   ['cpu', '进程 CPU（按分配核归一化）', 'percent'], ['gpu', 'GPU 利用率', 'percent'],

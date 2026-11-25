@@ -1,0 +1,6 @@
+.inspector-slot { position:relative }
+.inspector-ink { position:absolute; inset:0; display:block; width:100%; height:100%; pointer-events:none }
+.inspector-slot > .metric-unit,.inspector-slot > .time-unit { opacity:0 }
+@media(max-width:780px) {
+  #sample-time.inspector-slot::before { content:"最近采样 0000.000 s"; visibility:hidden }
+}

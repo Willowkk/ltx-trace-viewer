@@ -1,9 +1,10 @@
-import { demoTrace, normalizeTrace, REFERENCE_STAGES } from './data.js';
-import { mountCharts, STAGE_COLORS } from './charts.js?v=546ce96';
-import { getCounterOptions, chooseCounterMapping } from './mapping.js';
+import { demoTrace, normalizeTrace, REFERENCE_STAGES } from './data.js?v=2f0bb46e0f02';
+import { mountCharts, STAGE_COLORS } from './charts.js?v=a5aa5c0de9d3';
+import { getCounterOptions, chooseCounterMapping } from './mapping.js?v=9b62a4be8092';
 
-import { bindScrubber } from './scrubber.js';
-import { readCaptureFiles } from './import-files.js';
+import { bindScrubber } from './scrubber.js?v=525bef86689b';
+import { readCaptureFiles } from './import-files.js?v=a145b558ccaf';
+import { mountInspector } from './inspector.js?v=fa6828a0fd27';
 
 const byId = (id) => document.getElementById(id);
 const metrics = [
@@ -14,7 +15,8 @@ const metrics = [
 ];
 const metricsFormat = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 });
 let dataset, focusedStage, sourceJson, failedFile, sourceFilename;
-let ribbonMarker, displayedSample;
+let ribbonMarker, displayedSample, readings, stageInterval;
+const readingCache = new WeakMap();
 const cursorTime = byId('cursor-time');
 const cursorStage = byId('cursor-stage');
 const sampleTime = byId('sample-time');
@@ -43,6 +45,7 @@ for (const [key, name, unit] of metrics) {
   byId('values').append(cell);
   valueCells.set(key, number);
 }
+const setText = mountInspector(document.querySelector('.inspector'));
 
 // Only readings inside the displayed interval can appear in a stage detail.
 function lowerBound(samples, time) {
@@ -68,36 +71,61 @@ function nearestSample(time) {
   return time - before.time <= after.time - time ? before : after;
 }
 
-function setText(element, text) {
-  if (element.textContent === text) return;
-  if (element.firstChild) element.firstChild.nodeValue = text;
-  else element.textContent = text;
+// Stage membership is constant between consecutive start/end boundaries.
+// Keep the same list there so the labels and highlighted rows can skip work.
+function stagesAt(time) {
+  if (stageInterval && time >= stageInterval.start && time < stageInterval.end) return stageInterval;
+  let start = -Infinity, end = Infinity;
+  const active = [];
+  for (const stage of dataset.stages) {
+    if (stage.start > time) {
+      end = Math.min(end, stage.start);
+    } else if (stage.end <= time) {
+      start = Math.max(start, stage.end);
+    } else {
+      start = Math.max(start, stage.start);
+      end = Math.min(end, stage.end);
+      active.push(stage);
+    }
+  }
+  stageInterval = { start, end, active, label: active.map(stage => stage.name).join(' / ') || '未标注阶段' };
+  return stageInterval;
+}
+
+function formatReadings(sample) {
+  if (sample && readingCache.has(sample)) return readingCache.get(sample);
+  const values = {};
+  for (const [key] of metrics) values[key] = Number.isFinite(sample?.[key]) ? metricsFormat.format(sample[key]) : '—';
+  if (sample) readingCache.set(sample, values);
+  return values;
 }
 
 function updateCursor(time) {
   if (!dataset || !Number.isFinite(time)) return;
   const sample = nearestSample(time);
-  const stages = dataset.stages.filter(stage => time >= stage.start && time < stage.end);
+  const interval = stagesAt(time);
   setText(cursorTime, time.toFixed(2));
   const name = focusedStage && time === focusedStage.end
     ? focusedStage.name + ' · 阶段终点'
-    : stages.map(stage => stage.name).join(' / ') || '未标注阶段';
+    : interval.label;
   if (cursorStage.textContent !== name) {
     setText(cursorStage, name);
     cursorStage.title = name;
   }
   if (displayedSample !== sample) {
     displayedSample = sample;
+    readings = formatReadings(sample);
     setText(sampleTime, sample ? '最近采样 ' + sample.time.toFixed(3) + ' s' : '窗口内无采样');
     for (const [key, cell] of valueCells) {
-      setText(cell, Number.isFinite(sample?.[key]) ? metricsFormat.format(sample[key]) : '—');
+      setText(cell, readings[key]);
     }
   }
-  charts.setCursor(time, sample);
-  if (ribbonMarker) ribbonMarker.style.transform = 'translateX(' + (dataset.duration > 0 ? 100 * time / dataset.duration : 0) + '%)';
+  charts.setCursor(time, sample, readings, interval.active);
+  ribbonFraction = dataset.duration > 0 ? time / dataset.duration : 0;
+  positionRibbonMarker();
 }
 
-function selectStage(stage) {
+function selectStage(stage, initializeCursor = true) {
   focusedStage = stage;
   const wasMenuOpen = !byId('stage-menu').hidden;
   closeMenu(wasMenuOpen);
@@ -110,14 +138,17 @@ function selectStage(stage) {
   const interval = range[0].toFixed(2) + ' – ' + range[1].toFixed(2) + ' s';
   byId('scope-caption').textContent = stage ? interval + ' · ' + stage.id : interval;
   charts.render(dataset, range, { stage });
-  const mid = (range[0] + range[1]) / 2;
-  updateCursor(nearestSample(mid)?.time ?? mid);
-
+  if (initializeCursor) {
+    const mid = (range[0] + range[1]) / 2;
+    updateCursor(nearestSample(mid)?.time ?? mid);
+  }
 }
 
 function showData(data, fileName, json = null) {
   ribbonInput.reset();
   dataset = data;
+  stageInterval = null;
+  displayedSample = undefined;
   sourceJson = json;
   sourceFilename = fileName;
   failedFile = null;
@@ -168,6 +199,17 @@ const shortNames = {
   'diffusion.2': '二次去噪', 'video.decode': '视频解码', 'audio.decode': '音频解码'
 };
 
+// Translate only the two-pixel marker. The ribbon width comes from layout
+// notifications so scrubbing never has to measure it.
+let ribbonWidth = 0, ribbonFraction = 0;
+function positionRibbonMarker() {
+  if (ribbonMarker) ribbonMarker.style.transform = 'translate3d(' + (ribbonWidth * ribbonFraction) + 'px,0,0)';
+}
+new ResizeObserver(([entry]) => {
+  ribbonWidth = entry.contentRect.width;
+  positionRibbonMarker();
+}).observe(stageRibbon);
+
 function buildRibbon(data) {
   const ribbon = byId('ribbon');
   ribbon.replaceChildren();
@@ -209,7 +251,7 @@ const ribbonInput = bindScrubber(stageRibbon, {
   surfaceFor: () => stageRibbon,
   hover: false,
   onDragStart() {
-    if (focusedStage) selectStage(null);
+    if (focusedStage) selectStage(null, false);
   },
   onPosition(fraction) {
     updateCursor(Math.max(0, Math.min(1, fraction)) * dataset.duration);

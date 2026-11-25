@@ -54,8 +54,7 @@ h1 { font-size:clamp(28px,3.3vw,42px); font-weight:660; letter-spacing:-.05em; l
 .phase-slot:hover { filter:brightness(1.12); z-index:1 }
 .phase-slot span { font-size:11px; font-weight:600; white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis; padding-inline:3px }
 .phase-marker-clip { position:absolute; inset:-3px -1px; pointer-events:none; overflow:hidden; z-index:2 }
-.phase-marker { display:block; width:calc(100% - 2px); height:100%; margin-left:1px; will-change:transform }
-.phase-marker::before { content:""; display:block; width:2px; height:100%; background:var(--ink); box-shadow:0 0 0 1px var(--paper) }
+.phase-marker { display:block; width:2px; height:100%; margin-left:1px; background:var(--ink); box-shadow:0 0 0 1px var(--paper); will-change:transform }
 .phase-axis { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums }
 .scope-head { gap:12px; justify-content:space-between; margin:22px 2px 10px }
 .scope-title-group { min-width:0; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap }
@@ -78,21 +77,21 @@ h1 { font-size:clamp(28px,3.3vw,42px); font-weight:660; letter-spacing:-.05em; l
 .stage-id { display:block; margin-top:2px; overflow-wrap:anywhere }
 .analysis-layout { display:grid; grid-template-columns:minmax(0,1fr) clamp(226px,21%,278px); gap:16px; align-items:start }
 .plot-area { min-width:0; padding:3px 12px 8px }
-.inspector { position:sticky; top:12px; min-width:0; padding:20px }
+.inspector { position:sticky; top:12px; min-width:0; padding:20px; contain:layout }
 .inspector-head { gap:7px }
 .inspector h2 { font-size:16px; line-height:1.25; font-weight:610; letter-spacing:-.02em }
 .cross-icon { color:var(--blue-ink) }
 .cross-icon svg { width:18px; height:18px }
-.cursor-when { font-variant-numeric:tabular-nums; margin:13px 0 2px; line-height:1.2; white-space:nowrap }
-#cursor-time { font-weight:560; letter-spacing:-.055em; font-size:clamp(30px,3vw,42px) }
+.cursor-when { font-size:clamp(30px,3vw,42px); font-variant-numeric:tabular-nums; margin:13px 0 2px; height:1.2em; line-height:1.2; white-space:nowrap; contain:strict }
+#cursor-time { font-weight:560; letter-spacing:-.055em }
 .time-unit { color:var(--muted); margin-left:4px; font-size:16px }
-#cursor-stage { display:block; color:var(--blue-ink); font-size:14px; font-weight:560; overflow-wrap:anywhere }
-#sample-time { display:block; color:var(--secondary); font-size:12px; margin-top:4px; font-variant-numeric:tabular-nums }
+#cursor-stage { display:block; color:var(--blue-ink); font-size:14px; font-weight:560; line-height:1.4; height:2.8em; overflow:auto; overflow-wrap:anywhere; contain:strict }
+#sample-time { display:block; color:var(--secondary); font-size:12px; margin-top:4px; height:1.45em; font-variant-numeric:tabular-nums; contain:strict }
 .values { margin-top:17px }
-.metric { display:flex; align-items:baseline; justify-content:space-between; gap:8px; padding:3px 0; font-variant-numeric:tabular-nums }
+.metric { display:grid; grid-template-columns:4em minmax(0,1fr); align-items:baseline; gap:8px; padding:3px 0; font-variant-numeric:tabular-nums }
 .metric:nth-child(odd) { padding-top:9px; margin-top:6px; border-top:1px solid var(--line) }
 .metric-name { color:var(--secondary); font-size:13px }
-.metric-val { font-size:15px; font-weight:560; white-space:nowrap }
+.metric-val { height:1.45em; contain:strict; text-align:right; font-size:15px; font-weight:560; white-space:nowrap }
 .metric-unit { margin-left:3px; font-size:11px; color:var(--muted); font-weight:450 }
 .inspector-foot { margin-top:12px; font-size:12px; color:var(--muted) }
 .notice { margin-top:12px; padding:10px 15px; background:var(--tint); border-radius:12px; font-size:14px }
@@ -115,14 +114,14 @@ dialog::backdrop { background:#15151e55 }
   .inspector { order:-1; position:sticky; z-index:4; top:2px; display:grid; grid-template-columns:auto 1fr auto; align-items:baseline; gap:3px 8px; padding:9px 14px; border-radius:14px; background:var(--glass) }
   .inspector h2 { font-size:13px }
   .inspector-head { align-self:center }
-  .cursor-when { margin:0 }
-  #cursor-time { font-size:18px }
+  .cursor-when { margin:0; font-size:18px }
   .time-unit,.metric-val { font-size:12px }
-  #cursor-stage { grid-column:1/-1; grid-row:2; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-  #sample-time { grid-column:3; grid-row:1; margin:0; font-size:11px; white-space:nowrap }
+  #cursor-stage { grid-column:1/-1; grid-row:2; font-size:12px; height:1.4em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  #sample-time { grid-column:3; grid-row:1; margin:0; font-size:11px; white-space:nowrap; contain:layout }
   .values { grid-column:1/-1; width:100%; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:3px 4px; padding-top:3px; margin:0 }
   .metric,.metric:nth-child(odd) { display:block; border:0; padding:0; margin:0 }
   .metric-name,.metric-val { display:block; line-height:1.22 }
+  .metric-val { height:1.22em; text-align:left }
   .metric-name { font-size:11px }
   .metric-unit { font-size:10px }
   .inspector-foot { display:none }
@@ -157,6 +156,10 @@ dialog::backdrop { background:#15151e55 }
   .plot-area { padding:3px 4px }
   .metric-name,.metric-val { display:block }
   .metric-unit { margin-left:2px }
+}
+@media(max-width:479px) {
+  .metric-val { display:grid; grid-template-rows:1.22em 1em; contain:layout; height:auto }
+  .metric-unit { margin-left:0; font-size:9px }
 }
 .core-dialog label { display:block; font-size:14px; font-weight:550 }
 .core-dialog input { display:block; width:100% }

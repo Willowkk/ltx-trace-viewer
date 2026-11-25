@@ -2,5 +2,8 @@
   "name": "ltx-trace-viewer",
   "private": true,
   "type": "module",
-  "scripts": {"test": "node --test"}
+  "scripts": {
+    "test": "node --test",
+    "version-assets": "node scripts/version-assets.mjs"
+  }
 }
