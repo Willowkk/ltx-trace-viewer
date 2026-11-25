@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { counterField, demoTrace, normalizeTrace, REFERENCE_STAGES } from '../data.js';
+import { counterField, demoTrace, normalizeCaptureTables, normalizeTrace, REFERENCE_STAGES } from '../data.js';
 
 test('canonical input orders samples, aligns split rows, preserves gaps and recorded custom stages', () => {
   const data = normalizeTrace({
@@ -73,4 +73,36 @@ test('ignores ambiguous fractions and operation counts', () => {
   assert.equal(counterField('read', 'total_bytes', true), null);
   assert.equal(counterField('read', 'count', true), null);
   assert.deepEqual(counterField('gpu (%)', 'value', true), { key: 'gpu', factor: 1 });
+});
+
+test('capture tables align all eight series with the measured stage windows', () => {
+  const resources = [
+    '\uFEFFelapsed_s,cpu_cores,rss_gib,gpu_util_pct,gpu_memory_gib,logical_read_mib_s,process_read_mib_s,process_write_mib_s,pcie_rx_mib_s,pcie_tx_mib_s',
+    '1,2,6.5,90,3,999,26,0,400,150',
+    '2,0,,,0,123,23,1,19,0',
+  ].join('\r\n');
+  const phases = 'name,start_s,duration_s,other\nprompt.encode,0.8,1,"a,b"\nhelper,0,0.1,"c""d"\n';
+  const trace = normalizeCaptureTables(resources, phases, { allocatedCores: 4, duration: 3 });
+  assert.deepEqual(trace.samples[0], {time: 1, cpu: 50, gpu: 90, rss: 6.5, vram: 3, read: 26, write: 0, rx: 400, tx: 150});
+  assert.equal(trace.samples[1].gpu, null);
+  assert.equal(trace.stages.length, 1);
+  assert.equal(trace.stages[0].start, 0.8);
+  assert.equal(trace.stages[0].end, 1.8);
+  assert.equal(trace.duration, 3);
+  assert.throws(() => normalizeCaptureTables(resources, phases), /CPU 核数/);
+});
+
+test('a compact export preserves byte units, absent counters, and the earliest timestamped activity', () => {
+  const clock = 1700000000000000;
+  const trace = {traceEvents: [
+    { ph: 'X', name: 'parent', ts: clock, dur: 500000 },
+    { ph: 'X', name: 'diffusion.1', ts: clock + 100000, dur: 300000 },
+    { ph: 'C', name: 'GPU utilization', ts: clock + 200000, args: { percent: 42 } },
+    { ph: 'C', name: 'Process RSS', ts: clock + 200000, args: { bytes: 3 * 2 ** 30 } },
+    { ph: 'C', name: 'GPU memory', ts: clock + 200000, args: { bytes: 2 ** 29 } },
+  ]};
+  const data = normalizeTrace(trace);
+  assert.equal(data.timeBasis, 'trace');
+  assert.equal(data.stages[0].start, 0.1);
+  assert.deepEqual(data.samples[0], {time: 0.2, cpu: null, gpu: 42, rss: 3, vram: 0.5, read: null, write: null, rx: null, tx: null});
 });

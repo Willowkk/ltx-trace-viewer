@@ -1,6 +1,8 @@
 import { demoTrace, normalizeTrace, REFERENCE_STAGES } from './data.js';
-import { mountCharts } from './charts.js';
+import { mountCharts, STAGE_COLORS } from './charts.js';
 import { getCounterOptions, chooseCounterMapping } from './mapping.js';
+
+import { readCaptureFiles } from './import-files.js';
 
 const byId = (id) => document.getElementById(id);
 const metrics = [
@@ -10,14 +12,17 @@ const metrics = [
   ['rx', 'PCIe RX', 'MiB/s'], ['tx', 'PCIe TX', 'MiB/s'],
 ];
 const metricsFormat = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 });
-let dataset, focusedStage, sourceJson, failedFile;
+let dataset, focusedStage, sourceJson, failedFile, sourceFilename;
+let ribbonMarker;
 let range = [0, 1], importVersion = 0;
 const valueCells = new Map();
 const stageButtons = new Map();
+const ribbonButtons = new Map();
 const charts = mountCharts(byId('charts'), { onCursor: updateCursor, onStage: stage => { selectStage(stage); byId('scope-title').scrollIntoView({ block: 'start' }); } });
 
 for (const [key, name, unit] of metrics) {
   const cell = document.createElement('div');
+  cell.className = 'metric';
   const label = document.createElement('span');
   label.className = 'metric-name';
   label.textContent = name;
@@ -54,42 +59,51 @@ function nearestSample(time) {
 }
 
 function updateCursor(time) {
-  if (!dataset) return;
-  const active = Number.isFinite(time);
-  const sample = active ? nearestSample(time) : null;
-  const stages = active ? dataset.stages.filter(stage => time >= stage.start && time < stage.end) : [];
-  byId('cursor-time').textContent = active ? time.toFixed(2) + ' s' : '—';
-  byId('cursor-stage').textContent = active
-    ? stages.map(stage => stage.name).join(' / ') || '未标注阶段'
-    : '移入图表查看';
-  byId('sample-time').textContent = sample ? '最近采样 ' + sample.time.toFixed(3) + ' s' : active ? '窗口内无采样' : '';
+  if (!dataset || !Number.isFinite(time)) return;
+  const sample = nearestSample(time);
+  const stages = dataset.stages.filter(stage => time >= stage.start && time < stage.end);
+  byId('cursor-time').textContent = time.toFixed(2);
+  byId('cursor-stage').textContent = focusedStage && time === focusedStage.end
+    ? focusedStage.name + ' · 阶段终点'
+    : stages.map(stage => stage.name).join(' / ') || '未标注阶段';
+  byId('sample-time').textContent = sample ? '最近采样 ' + sample.time.toFixed(3) + ' s' : '窗口内无采样';
   for (const [key, cell] of valueCells) {
     cell.textContent = Number.isFinite(sample?.[key]) ? metricsFormat.format(sample[key]) : '—';
   }
-  charts.setCursor(active ? time : null, sample);
+  charts.setCursor(time, sample);
+  if (ribbonMarker) ribbonMarker.style.left = (dataset.duration > 0 ? 100 * time / dataset.duration : 0) + '%';
 }
 
 function selectStage(stage) {
   focusedStage = stage;
+  const wasMenuOpen = !byId('stage-menu').hidden;
+  closeMenu(wasMenuOpen);
   range = stage ? [stage.start, stage.end] : [0, dataset.duration];
   byId('overview-button').setAttribute('aria-current', String(!stage));
   for (const [item, button] of stageButtons) button.setAttribute('aria-current', String(item === stage));
-  byId('scope-title').textContent = stage ? stage.name : '全程总览';
-  byId('scope-caption').textContent = stage
-    ? stage.id + ' · 阶段时长 ' + (stage.end - stage.start).toFixed(2) + ' s'
-    : '在任一图上移动游标，同步查看当前阶段与八项资源读数。';
-  byId('scope-range').textContent = range[0].toFixed(2) + ' – ' + range[1].toFixed(2) + ' s';
+  byId('phase-toggle').setAttribute('aria-current', String(Boolean(stage)));
+  for (const [item, button] of ribbonButtons) button.setAttribute('aria-pressed', String(item === stage));
+  byId('scope-title').textContent = stage ? stage.name.replace(/（含其模型构建）$/, '') : '资源曲线';
+  const interval = range[0].toFixed(2) + ' – ' + range[1].toFixed(2) + ' s';
+  byId('scope-caption').textContent = stage ? interval + ' · ' + stage.id : interval;
   charts.render(dataset, range, { stage });
-  updateCursor(null);
+  const mid = (range[0] + range[1]) / 2;
+  updateCursor(nearestSample(mid)?.time ?? mid);
+
 }
 
 function showData(data, fileName, json = null) {
   dataset = data;
   sourceJson = json;
+  sourceFilename = fileName;
   failedFile = null;
   const isDemo = json === null;
-  byId('source-type').textContent = isDemo ? '模拟示例' : '本地文件';
-  byId('source-name').textContent = fileName;
+  const count = metrics.filter(([key]) => data.samples.some(row => Number.isFinite(row[key]))).length;
+  const sourceType = isDemo ? '模拟示例' : '本地采集';
+  byId('source-type').textContent = sourceType + ' · ' + count + '/8 项资源指标'
+    + (data.timeBasis === 'trace' ? ' · 以 Trace 起点计时' : '');
+  byId('source-name').textContent = isDemo ? fileName : data.title || fileName;
+  byId('source-name').title = fileName;
   byId('reset-demo').hidden = isDemo;
   byId('apply-reference').hidden = isDemo || data.stages.length > 0;
   byId('edit-mapping').hidden = !json || !(Array.isArray(json) || Array.isArray(json.traceEvents)) || !getCounterOptions(json).length;
@@ -119,8 +133,87 @@ function showData(data, fileName, json = null) {
     stageButtons.set(stage, button);
     byId('stages').append(button);
   }
+  buildRibbon(data);
+  byId('phase-toggle').disabled = !data.stages.length;
   selectStage(null);
 }
+
+const shortNames = {
+  'runtime.import_torch': 'Torch', 'runtime.import_pipeline': 'Pipeline',
+  'prompt.encode': '文本编码', 'diffusion.1': '首次去噪', 'video.spatial_upsample': '上采样',
+  'diffusion.2': '二次去噪', 'video.decode': '视频解码', 'audio.decode': '音频解码'
+};
+
+function buildRibbon(data) {
+  const ribbon = byId('ribbon');
+  ribbon.replaceChildren();
+  ribbonButtons.clear();
+  data.stages.forEach((stage, i) => {
+    const button = document.createElement('button');
+    button.className = 'phase-slot';
+    const width = 100 * (stage.end - stage.start) / data.duration;
+    button.style.left = (100 * stage.start / data.duration) + '%';
+    button.style.width = width + '%';
+    button.style.setProperty('--phase', STAGE_COLORS[i % STAGE_COLORS.length]);
+    button.title = stage.name + ' · ' + stage.start.toFixed(2) + ' – ' + stage.end.toFixed(2) + ' s';
+    button.setAttribute('aria-label', button.title);
+    if (width >= 8) {
+      const text = document.createElement('span');
+      text.textContent = shortNames[stage.id] || stage.name;
+      button.append(text);
+    }
+    button.addEventListener('click', () => selectStage(stage));
+    ribbon.append(button);
+    ribbonButtons.set(stage, button);
+  });
+  ribbonMarker = document.createElement('span');
+  ribbonMarker.className = 'phase-marker';
+  ribbon.append(ribbonMarker);
+  const axis = byId('ribbon-axis');
+  axis.replaceChildren();
+  for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+    const tick = document.createElement('span');
+    tick.textContent = metricsFormat.format(data.duration * fraction) + ' s';
+    axis.append(tick);
+  }
+}
+
+function closeMenu(returnFocus = false) {
+  byId('stage-menu').hidden = true;
+  byId('phase-toggle').setAttribute('aria-expanded', 'false');
+  if (returnFocus) byId('phase-toggle').focus();
+}
+
+byId('phase-toggle').addEventListener('click', () => {
+  if (!byId('stage-menu').hidden) return closeMenu();
+  byId('stage-menu').hidden = false;
+  byId('phase-toggle').setAttribute('aria-expanded', 'true');
+  const buttons = Array.from(stageButtons.values());
+  (stageButtons.get(focusedStage) || buttons[0])?.focus();
+});
+document.addEventListener('pointerdown', event => {
+  if (!event.target.closest('.picker-anchor') && !byId('stage-menu').hidden) closeMenu();
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !byId('stage-menu').hidden) closeMenu(true);
+});
+const media = window.matchMedia('(prefers-color-scheme: dark)');
+let theme;
+try { theme = localStorage.getItem('ltx-appearance'); } catch { /* storage is optional */ }
+function updateTheme() {
+  const dark = theme ? theme === 'dark' : media.matches;
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  const label = dark ? '切换到浅色外观' : '切换到深色外观';
+  byId('theme-button').title = label;
+  byId('theme-button').setAttribute('aria-label', label);
+}
+byId('theme-button').addEventListener('click', () => {
+  theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  try { localStorage.setItem('ltx-appearance', theme); } catch { /* storage is optional */ }
+  updateTheme();
+});
+media.addEventListener('change', updateTheme);
+updateTheme();
 
 function notify(message = '', canMap = false) {
   byId('notice').hidden = !message;
@@ -134,36 +227,23 @@ function resetDemo() {
   notify();
 }
 
-async function readJson(file) {
-  const prefix = new Uint8Array(await file.slice(0, 2).arrayBuffer());
-  let content;
-  if (prefix[0] === 0x1f && prefix[1] === 0x8b) {
-    if (!window.DecompressionStream) throw new Error('此浏览器无法解压 gzip。请先解压为 .json 再导入。');
-    const stream = file.stream().pipeThrough(new DecompressionStream('gzip'));
-    content = await new Response(stream).text();
-  } else {
-    content = await file.text();
-  }
-  try { return JSON.parse(content.replace(/^\uFEFF/, '')); }
-  catch { throw new Error('文件不是有效的 JSON，请检查文件内容或从 gzip 包解压后再试。'); }
-}
-
-async function importFile(file) {
-  if (!file) return;
+async function importFiles(files) {
+  if (!files?.length) return;
   const version = ++importVersion;
   failedFile = null;
-  notify('正在读取 ' + file.name + '…');
-  let json;
+  notify('正在读取文件…');
+  let json, name;
   try {
-    json = await readJson(file);
+    const loaded = await readCaptureFiles(files);
     if (version !== importVersion) return;
-    const data = normalizeTrace(json);
-    showData(data, file.name, json);
+    if (!loaded) { notify(); return; }
+    ({ json, name } = loaded);
+    showData(normalizeTrace(json), name, json);
     notify();
   } catch (error) {
     if (version !== importVersion) return;
     const canMap = !!json && (Array.isArray(json) || Array.isArray(json.traceEvents)) && getCounterOptions(json).length > 0;
-    if (canMap) failedFile = { json, name: file.name };
+    if (canMap) failedFile = { json, name };
     notify('导入失败 · ' + error.message, canMap);
   }
 }
@@ -186,19 +266,19 @@ byId('apply-reference').addEventListener('click', () => {
     notify('参考阶段延伸到 ' + refEnd.toFixed(2) + ' s，超出当前采集范围。请在 JSON 的 stages 中提供实际阶段。');
     return;
   }
-  const name = byId('source-name').textContent;
+  const name = sourceFilename;
   showData({ ...dataset, stages: REFERENCE_STAGES }, name, sourceJson);
   notify('已按截图给出的起止时间标注八个阶段。');
 });
 
 byId('overview-button').addEventListener('click', () => selectStage(null));
 byId('retry-mapping').addEventListener('click', () => { if (failedFile) mapFile(failedFile.json, failedFile.name); });
-byId('edit-mapping').addEventListener('click', () => mapFile(sourceJson, byId('source-name').textContent));
+byId('edit-mapping').addEventListener('click', () => mapFile(sourceJson, sourceFilename));
 byId('import-button').addEventListener('click', () => byId('file').click());
 byId('file').addEventListener('change', event => {
-  const [file] = event.target.files;
+  const files = Array.from(event.target.files);
   event.target.value = '';
-  importFile(file);
+  importFiles(files);
 });
 byId('reset-demo').addEventListener('click', resetDemo);
 
@@ -220,8 +300,7 @@ window.addEventListener('drop', event => {
   event.preventDefault();
   dragDepth = 0;
   byId('drop-layer').hidden = true;
-  if (event.dataTransfer.files.length !== 1) return notify('请一次导入一个时间轴文件。');
-  importFile(event.dataTransfer.files[0]);
+  importFiles(Array.from(event.dataTransfer.files));
 });
 
 byId('help-button').addEventListener('click', () => byId('help').showModal());
@@ -236,4 +315,15 @@ byId('download-demo').addEventListener('click', () => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 
-resetDemo();
+const embedded = byId('embedded-capture');
+if (embedded) {
+  try {
+    const json = JSON.parse(embedded.textContent);
+    showData(normalizeTrace(json), json.title || '本地采集', json);
+  } catch (error) {
+    resetDemo();
+    notify('内嵌数据读取失败 · ' + error.message);
+  }
+} else {
+  resetDemo();
+}

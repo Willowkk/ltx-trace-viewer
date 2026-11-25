@@ -199,6 +199,83 @@ export function counterField(group, field, onlyValue) {
   return null;
 }
 
+// Both capture tables use seconds since the capture process started. Parsing
+// the CSV fields by name also keeps logical reads distinct from storage reads.
+function csvRows(text, requiredColumns, fileName) {
+  if (typeof text !== 'string') throw new Error(fileName + ' 应为 CSV 文本。');
+  const input = text.replace(/^\uFEFF/, '');
+  const rows = [];
+  let row = [], value = '', quoted = false;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (ch === '"') {
+      if (quoted && input[i + 1] === '"') { value += '"'; i++; }
+      else quoted = !quoted;
+    } else if (ch === ',' && !quoted) {
+      row.push(value.trim());
+      value = '';
+    } else if ((ch === '\r' || ch === '\n') && !quoted) {
+      if (ch === '\r' && input[i + 1] === '\n') i++;
+      row.push(value.trim());
+      if (row.some(field => field !== '')) rows.push(row);
+      row = [];
+      value = '';
+    } else {
+      value += ch;
+    }
+  }
+  if (quoted) throw new Error(fileName + ' 中的引号未闭合。');
+  row.push(value.trim());
+  if (row.some(field => field !== '')) rows.push(row);
+  const headers = rows.shift() || [];
+  if (new Set(headers).size !== headers.length || requiredColumns.some(key => !headers.includes(key))) {
+    throw new Error(fileName + ' 需要无重复的表头，必需列为 ' + requiredColumns.join(', ') + '。');
+  }
+  return rows.map((fields, i) => {
+    if (fields.length !== headers.length) throw new Error(fileName + ' 第 ' + (i + 2) + ' 行列数与表头不符。');
+    return Object.fromEntries(headers.map((key, j) => [key, fields[j]]));
+  });
+}
+
+function intervalsToStages(intervals) {
+  const counts = new Map();
+  return intervals.sort((a, b) => a.start - b.start).map(({ id, start, duration }) => {
+    const count = (counts.get(id) || 0) + 1;
+    counts.set(id, count);
+    return { id: count === 1 ? id : id + '#' + count, name: STAGE_NAMES.get(id), start, end: start + duration };
+  });
+}
+
+const RESOURCE_COLUMNS = {
+  gpu: 'gpu_util_pct', rss: 'rss_gib', vram: 'gpu_memory_gib', read: 'process_read_mib_s',
+  write: 'process_write_mib_s', rx: 'pcie_rx_mib_s', tx: 'pcie_tx_mib_s',
+};
+
+export function normalizeCaptureTables(resourcesCSV, phasesCSV, options = {}) {
+  const rows = csvRows(resourcesCSV, ['elapsed_s'], 'resources.csv');
+  const needsCores = rows.some(row => row.cpu_cores !== undefined && row.cpu_cores !== '');
+  if (needsCores && !(Number.isFinite(options.allocatedCores) && options.allocatedCores > 0)) {
+    throw new Error('请指定本次采集分配的 CPU 核数，以换算 CPU 利用率。');
+  }
+  const samples = rows.map((row, i) => {
+    if (row.elapsed_s === '') throw new Error('resources.csv 第 ' + (i + 2) + ' 行缺少 elapsed_s。');
+    const sample = { time: Number(row.elapsed_s) };
+    if (row.cpu_cores !== undefined && row.cpu_cores !== '') {
+      sample.cpu = Number(row.cpu_cores) * 100 / options.allocatedCores;
+    }
+    for (const [key, column] of Object.entries(RESOURCE_COLUMNS)) {
+      if (row[column] !== undefined && row[column] !== '') sample[key] = Number(row[column]);
+    }
+    return sample;
+  });
+  const phases = phasesCSV == null ? [] : csvRows(phasesCSV, ['name', 'start_s', 'duration_s'], 'phases.csv');
+  const intervals = phases.filter(row => STAGE_NAMES.has(row.name)).map(row => {
+    if (!row.start_s || !row.duration_s) throw new Error('phases.csv 中的阶段缺少起点或时长。');
+    return { id: row.name, start: Number(row.start_s), duration: Number(row.duration_s) };
+  });
+  return canonical({ samples, stages: intervalsToStages(intervals), duration: options.duration, title: options.title });
+}
+
 function chromeTrace(document, events) {
   if (!Array.isArray(events)) throw new Error('traceEvents 应为数组。');
   const byTime = new Map();
@@ -206,9 +283,13 @@ function chromeTrace(document, events) {
   const phases = [];
   const resolveCache = new Map();
   let firstTime = Infinity;
+  let firstAbsoluteActivity = Infinity;
 
   for (const event of events) {
     if (!event || typeof event !== 'object') continue;
+    if (event.ph !== 'M' && Number.isFinite(event.ts) && event.ts >= 1e12) {
+      firstAbsoluteActivity = Math.min(firstAbsoluteActivity, event.ts);
+    }
     if (event.ph === 'X' && STAGE_NAMES.has(event.name)) {
       const start = number(event.ts, event.name + '.ts');
       const duration = number(event.dur, event.name + '.dur');
@@ -243,25 +324,19 @@ function chromeTrace(document, events) {
     }
   }
   // Relative capture times retain the lead-in before the first sample. For
-  // epoch-sized clocks the first displayed event is the default origin.
+  // epoch-sized clocks use the earliest activity, including surrounding spans.
   const origin = document.timeOriginUs !== undefined
     ? number(document.timeOriginUs, 'timeOriginUs')
-    : (Number.isFinite(firstTime) && firstTime >= 1e12 ? firstTime : 0);
+    : (Number.isFinite(firstTime) && firstTime >= 1e12 ? firstAbsoluteActivity : 0);
   if (firstTime < origin) throw new Error('timeOriginUs 晚于资源采样或阶段的起点。');
   for (const row of byTime.values()) row.time = (row.time - origin) / 1e6;
-  const counts = new Map();
-  const stages = phases.sort((a, b) => a.start - b.start).map(phase => {
-    const count = (counts.get(phase.id) || 0) + 1;
-    counts.set(phase.id, count);
-    return {
-      id: count === 1 ? phase.id : phase.id + '#' + count,
-      name: STAGE_NAMES.get(phase.id),
-      start: (phase.start - origin) / 1e6,
-      end: (phase.start - origin + phase.duration) / 1e6,
-    };
-  });
+  const stages = intervalsToStages(phases.map(phase => ({
+    id: phase.id, start: (phase.start - origin) / 1e6, duration: phase.duration / 1e6,
+  })));
   const fallback = document.stages ?? (document.stagePreset === 'ltx-reference' ? REFERENCE_STAGES : []);
-  return finish(byTime, stageList(stages.length ? stages : fallback), { title: document.title });
+  const result = finish(byTime, stageList(stages.length ? stages : fallback), { title: document.title, duration: document.duration });
+  if (document.timeOriginUs === undefined && origin > 0) result.timeBasis = 'trace';
+  return result;
 }
 
 export function normalizeTrace(json) {

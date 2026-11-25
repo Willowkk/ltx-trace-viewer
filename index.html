@@ -3,68 +3,88 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <meta name="description" content="在同一条时间轴上联动查看 LTX 推理阶段、计算、内存、存储和 PCIe 采样。">
   <title>LTX 推理时间线 · Trace Studio</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="charts.css">
+  <link rel="stylesheet" href="mapping.css">
 </head>
 <body>
-  <header class="masthead">
-    <div class="mast-inner">
-      <div class="brand"><img src="icon.svg" alt="" width="30" height="30"><span>Trace Studio</span></div>
-      <div class="mast-actions">
-        <button id="help-button" class="btn secondary">格式说明</button>
-        <button id="import-button" class="btn primary"><span class="upload-icon" aria-hidden="true">↥</span>导入 JSON</button>
-        <input id="file" type="file" accept=".json,.gz,application/json,application/gzip" hidden>
-      </div>
-    </div>
-  </header>
+
   <main class="workspace">
-    <section class="summary" aria-labelledby="page-title">
-      <div class="summary-title">
-        <div class="source-line"><span class="source-badge" id="source-type">模拟示例</span><span id="source-name">LTX-2.5</span></div>
-        <h1 id="page-title">LTX 推理时间线</h1>
+    <header class="toolbar">
+      <h1>LTX 推理时间线</h1>
+      <div class="tools">
+        <button type="button" id="theme-button" class="icon-btn" title="切换外观" aria-label="切换外观">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button id="help-button" class="icon-btn" title="格式说明" aria-label="格式说明">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.4a2.5 2.5 0 1 1 4.3 1.7c-1 .8-1.9 1.2-1.9 2.7"/><circle cx="12" cy="16.4" r=".9" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button id="import-button" class="btn primary" title="打开 JSON、JSON.GZ 或 CSV">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
+          导入文件
+        </button>
+        <input id="file" type="file" accept=".json,.gz,.csv,application/json,application/gzip,text/csv" multiple hidden>
       </div>
-      <dl class="stats">
-        <div><dt>采集时长</dt><dd><span id="duration">—</span><small> s</small></dd></div>
-        <div><dt>采样点</dt><dd id="sample-count">—</dd></div>
-        <div><dt>推理阶段</dt><dd id="stage-count">—</dd></div>
-      </dl>
+    </header>
+
+    <section class="capture surface" aria-label="采集概览">
+      <div class="capture-top">
+        <div class="identity">
+          <span class="capture-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M3 17h5l3-9 5 17 4-20 3 13h6"/></svg></span>
+          <div class="identity-text"><div class="source-line"><span id="source-type">模拟示例</span></div><h2 id="source-name">LTX-2.5</h2></div>
+        </div>
+        <dl class="stats">
+          <div><dt>时长</dt><dd><span id="duration">—</span><small> s</small></dd></div>
+          <div><dt>采样点</dt><dd id="sample-count">—</dd></div>
+          <div><dt>阶段</dt><dd id="stage-count">—</dd></div>
+        </dl>
+      </div>
+      <div class="phase-map" id="ribbon" role="group" aria-label="全程阶段导航"></div>
+      <div class="phase-axis" aria-hidden="true" id="ribbon-axis"></div>
     </section>
+
     <div class="notice" id="notice" role="status" hidden><span id="notice-text"></span><button id="retry-mapping" class="text-btn" hidden>手动匹配指标</button></div>
-    <div class="layout">
-      <aside class="sidebar">
-        <nav class="side-card" aria-label="推理阶段">
-          <div class="side-head"><h2>阶段导航</h2><span class="unit">秒</span></div>
-          <button id="overview-button" class="stage-button all-button"><span class="all-icon" aria-hidden="true">▦</span><span>全程总览</span></button>
+    <div class="scope-head">
+      <div class="scope-title-group"><h2 id="scope-title">资源曲线</h2><span class="scope-caption" id="scope-caption"></span></div>
+      <div class="picker-anchor">
+        <div class="segmented" aria-label="时间范围">
+          <button id="overview-button" aria-current="true">全程总览</button>
+          <button id="phase-toggle" aria-controls="stage-menu" aria-expanded="false"><span>分阶段</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
+        </div>
+        <nav id="stage-menu" aria-label="选择推理阶段" class="stage-menu" hidden>
+          <div class="menu-head"><span>选择推理阶段</span><span>时长</span></div>
           <div id="stages"></div>
         </nav>
-        <div class="sidebar-actions">
-          <button class="text-btn" id="apply-reference" hidden>套用参考八阶段</button>
-          <button class="text-btn" id="edit-mapping" hidden>匹配指标字段</button>
-          <button class="text-btn" id="reset-demo" hidden>重新打开模拟示例</button>
-        </div>
+      </div>
+    </div>
+
+    <div class="analysis-layout">
+      <section class="plot-area surface" aria-labelledby="scope-title"><div id="charts"></div></section>
+      <aside class="inspector surface" aria-label="联动采样读数">
+        <div class="inspector-head"><span class="cross-icon" aria-hidden="true"><svg viewBox="0 0 22 22"><circle cx="11" cy="11" r="6.7"/><path d="M11 1.8v5m0 8.4v5M1.8 11h5m8.4 0h5"/></svg></span><h2>采样读数</h2></div>
+        <div class="cursor-when"><strong id="cursor-time">—</strong><span class="time-unit">s</span></div>
+        <strong id="cursor-stage">—</strong><span id="sample-time"></span>
+        <div class="values" id="values"></div>
+        <p class="inspector-foot">移动游标联动查看，方向键逐点读取。</p>
       </aside>
-      <section class="plot-area" aria-labelledby="scope-title">
-        <div class="scope-head"><div><h2 id="scope-title">全程总览</h2><p id="scope-caption">移动游标可同时查看各图在同一时刻的读数。</p></div><span id="scope-range"></span></div>
-        <section class="inspector" aria-label="联动游标读数">
-          <div class="cursor-info">
-            <div class="cursor-key"><span aria-hidden="true" class="cross-icon">⊹</span>联动游标</div>
-            <strong id="cursor-time">—</strong><span id="cursor-stage">移入图表查看</span><span id="sample-time"></span>
-          </div>
-          <div class="values" id="values"></div>
-        </section>
-        <div id="charts"></div>
-      </section>
+    </div>
+    <div class="file-actions">
+      <button class="text-btn" id="apply-reference" hidden>套用参考八阶段</button>
+      <button class="text-btn" id="edit-mapping" hidden>匹配指标字段</button>
+      <button class="text-btn" id="reset-demo" hidden>打开模拟示例</button>
     </div>
   </main>
   <dialog id="help" class="help-dialog">
     <div class="dialog-head"><h2>导入时间线</h2><button id="close-help" class="close" aria-label="关闭">×</button></div>
-    <p>点击「导入 JSON」或把文件拖入页面。文件在本机浏览器中解析。</p>
+    <p>点击「导入文件」或把文件拖入页面。文件在本机浏览器中解析。</p>
     <h3>Chrome Trace</h3>
     <p>支持包含阶段事件与资源计数器的 <code>.json</code> 和 <code>.json.gz</code>。可直接选择合并后的阶段与资源时间轴。导入后可手动匹配自定义计数器和单位。</p>
+    <h3>完整采集 CSV</h3>
+    <p>同时选择同一次采集的 <code>resources.csv</code> 与 <code>phases.csv</code>，也可加入 <code>manifest.json</code>。CPU 核数用于把进程占用换算为百分比。</p>
     <h3>通用 JSON</h3>
     <p><code>time</code>、<code>start</code>、<code>end</code> 以采集启动为零点，单位为秒。CPU / GPU 用百分比，内存用 GiB，存储和 PCIe 速率用 MiB/s。缺测可以省略或填 <code>null</code>。</p>
     <pre><code>{

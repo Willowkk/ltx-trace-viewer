@@ -5,8 +5,8 @@ const PLOTS = [
   { title: '存储 I/O', unit: 'MiB/s', series: [['read', '读取'], ['write', '写入']] },
   { title: 'PCIe 吞吐量', unit: 'MiB/s', series: [['rx', '设备 RX'], ['tx', '设备 TX']] },
 ];
-const COLORS = ['#2863da', '#078673'];
-const STAGE_COLORS = ['#7b8cba', '#7883b9', '#0e927e', '#366dd6', '#aa7a25', '#4772c2', '#8e73bd', '#a574aa'];
+const COLORS = ['var(--lc-blue)', 'var(--lc-orange)'];
+export const STAGE_COLORS = ['#78808c', '#657694', '#6e63bb', '#0071e3', '#3a898a', '#3e61ba', '#50836c', '#a96275'];
 const format = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 });
 const number = (value) => format.format(value);
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
@@ -55,36 +55,44 @@ function axisNumber(value, step) {
 function xGrid(root, layout, range, bottom) {
   const [start, end] = range;
   const { left, right, scaleX, top } = layout;
-  const step = tickSize((end - start) / Math.max(2, Math.floor((right - left) / 83)));
+  const step = tickSize((end - start) / Math.max(2, Math.floor((right - left) / 87)));
   const first = Math.ceil(start / step - 1e-9) * step;
   for (let i = 0; i < 40; i++) {
     const value = first + i * step;
     if (value > end + step * 1e-8) break;
     const x = scaleX(value);
     root.append(svg('line', { x1: x, x2: x, y1: top, y2: bottom, class: 'lc-grid lc-grid-x' }));
-    const anchor = x < left + 9 ? 'start' : x > right - 9 ? 'end' : 'middle';
-    root.append(svg('text', { x, y: bottom + 16, 'text-anchor': anchor, class: 'lc-tick' }, axisNumber(value, step) + ' s'));
+    const label = axisNumber(value, step) + ' s';
+    const halfWidth = label.length * 3.5;
+    const anchor = x < left + halfWidth ? 'start' : x > right - halfWidth ? 'end' : 'middle';
+    root.append(svg('text', { x, y: bottom + 17, 'text-anchor': anchor, class: 'lc-tick' }, label));
   }
 }
 
 // Preserve each pixel column's first, minimum, maximum and last value. A gap
 // explicitly recorded as null always breaks the path even in a dense capture.
-function seriesPath(samples, key, scaleX, scaleY) {
-  let line = '', dots = '', bucket = null, previous = null, runLength = 0;
+function seriesPath(samples, key, scaleX, scaleY, baseline) {
+  let line = '', area = '', dots = '', run = '', runLength = 0;
+  let bucket = null, firstX, lastX, lastY;
   function flush() {
     if (!bucket) return;
     const values = [...new Set([bucket.first, bucket.min, bucket.max, bucket.last])].sort((a, b) => a.time - b.time);
     for (const row of values) {
       const x = scaleX(row.time).toFixed(2), y = scaleY(row[key]).toFixed(2);
-      line += (runLength ? 'L' : 'M') + x + ',' + y;
-      previous = [x, y];
+      run += (runLength ? 'L' : 'M') + x + ',' + y;
+      if (!runLength) firstX = x;
+      lastX = x;
+      lastY = y;
       runLength++;
     }
     bucket = null;
   }
   function finishRun() {
     flush();
-    if (runLength === 1) dots += 'M' + previous.join(',') + 'l0.01,0';
+    line += run;
+    if (runLength === 1) dots += 'M' + lastX + ',' + lastY + 'l0.01,0';
+    if (runLength > 1 && baseline !== undefined) area += run + 'V' + baseline + 'H' + firstX + 'Z';
+    run = '';
     runLength = 0;
   }
   for (const row of samples) {
@@ -103,7 +111,7 @@ function seriesPath(samples, key, scaleX, scaleY) {
     }
   }
   finishRun();
-  return { line, dots };
+  return { line, area, dots };
 }
 
 function section(title, unit) {
@@ -121,7 +129,7 @@ function cursorOverlay(root, layout, bottom) {
   const line = svg('line', { x1: 0, x2: 0, y1: layout.top - 2, y2: bottom + 1, class: 'lc-crosshair' });
   const label = svg('g', {});
   const text = svg('text', { x: 0, y: 13, 'text-anchor': 'middle' });
-  const background = svg('rect', { x: -32, y: 0, width: 64, height: 18, rx: 4 });
+  const background = svg('rect', { x: -32, y: 0, width: 64, height: 19, rx: 6 });
   label.append(background, text);
   group.append(line, label);
   root.append(group);
@@ -152,8 +160,9 @@ function metricPanel(config, samples, range, layout) {
     return value;
   });
   head.append(legend);
-  const bottom = 90;
-  const root = svg('svg', { class: 'lc-plot', viewBox: '0 0 ' + layout.width + ' 113', width: '100%', height: 113,
+  const bottom = layout.width < 560 ? 93 : 106;
+  const height = bottom + 25;
+  const root = svg('svg', { class: 'lc-plot', viewBox: '0 0 ' + layout.width + ' ' + height, width: '100%', height,
     role: 'slider', tabindex: 0, 'aria-label': config.title + '时间游标', 'aria-valuemin': range[0], 'aria-valuemax': range[1], 'aria-valuenow': range[0] });
   const { left, right, top, scaleX } = layout;
   xGrid(root, layout, range, bottom);
@@ -171,18 +180,19 @@ function metricPanel(config, samples, range, layout) {
   const scaleY = (value) => bottom - (bottom - top) * value / ceiling;
   for (let i = 0; i <= Math.round(ceiling / step); i++) {
     const value = i * step, y = scaleY(value);
-    root.append(svg('line', { x1: left, x2: right, y1: y, y2: y, class: 'lc-grid' }));
-    root.append(svg('text', { x: left - 8, y: y + 4, 'text-anchor': 'end', class: 'lc-tick' }, axisNumber(value, step)));
+    root.append(svg('line', { x1: left, x2: right, y1: y, y2: y, class: i ? 'lc-grid' : 'lc-grid lc-baseline' }));
+    root.append(svg('text', { x: left - 9, y: y + 4, 'text-anchor': 'end', class: 'lc-tick' }, axisNumber(value, step)));
   }
   config.series.forEach(([key], i) => {
-    const { line, dots } = seriesPath(samples, key, scaleX, scaleY);
+    const { line, area, dots } = seriesPath(samples, key, scaleX, scaleY, i === 0 ? bottom : undefined);
+    if (area) root.append(svg('path', { d: area, class: 'lc-area' }));
     root.append(svg('path', { d: line, class: 'lc-series', stroke: COLORS[i] }));
     if (dots) root.append(svg('path', { d: dots, class: 'lc-dot-series', stroke: COLORS[i] }));
   });
   if (!hasData) root.append(svg('text', { x: (left + right) / 2, y: (top + bottom) / 2, 'text-anchor': 'middle', class: 'lc-empty' }, '当前范围无采样'));
   const overlay = cursorOverlay(root, layout, bottom);
   const marks = COLORS.map(color => {
-    const mark = svg('circle', { r: 3.6, fill: color, stroke: '#fff', 'stroke-width': 1.5, visibility: 'hidden', 'pointer-events': 'none' });
+    const mark = svg('circle', { r: 3.8, fill: color, stroke: 'var(--lc-surface)', 'stroke-width': 1.8, visibility: 'hidden', 'pointer-events': 'none' });
     root.append(mark);
     return mark;
   });
@@ -208,7 +218,7 @@ function stagePanel(stages, range, layout, onStage) {
   head.append(html('span', 'lc-phase-hint', '点击阶段查看局部曲线'));
   const visible = stages.map((stage, index) => ({ stage, color: STAGE_COLORS[index % STAGE_COLORS.length] }))
     .filter(({ stage }) => stage.end > range[0] && stage.start < range[1]);
-  const lane = 27, bottom = layout.top + Math.max(1, visible.length) * lane + 2;
+  const lane = 26, bottom = layout.top + Math.max(1, visible.length) * lane + 2;
   const root = svg('svg', { class: 'lc-plot lc-stage-plot', viewBox: '0 0 ' + layout.width + ' ' + (bottom + 24),
     width: '100%', height: bottom + 24, role: 'group', tabindex: 0, 'aria-label': '阶段时间线' });
   xGrid(root, layout, range, bottom);
@@ -218,9 +228,9 @@ function stagePanel(stages, range, layout, onStage) {
     const x1 = scaleX(Math.max(range[0], s.start)), x2 = scaleX(Math.min(range[1], s.end));
     const group = svg('g', { class: 'lc-lane', role: 'button', tabindex: 0, 'aria-label': s.name + '，' + number(s.start) + ' 至 ' + number(s.end) + ' 秒，查看阶段' });
     const title = svg('title', {}, s.name + ' · ' + s.id + ' · ' + number(s.start) + '–' + number(s.end) + ' s');
-    const hit = svg('rect', { x: left, y: y - lane / 2, width: right - left, height: lane, fill: 'transparent', class: 'lc-lane-hit', rx: 3 });
+    const hit = svg('rect', { x: left, y: y - lane / 2, width: right - left, height: lane, fill: 'transparent', class: 'lc-lane-hit', rx: 5 });
     const track = svg('line', { x1: left, x2: right, y1: y, y2: y, class: 'lc-track' });
-    const bar = svg('rect', { x: x1, y: y - 6, width: Math.max(1, x2 - x1), height: 12, rx: 3, fill: color });
+    const bar = svg('rect', { x: x1, y: y - 5, width: Math.max(1.5, x2 - x1), height: 10, rx: 5, class: 'lc-stage-bar', fill: color });
     let anchor = 'start', labelX = x2 + 6, room = right - labelX;
     if (x1 - left - 6 > room) { anchor = 'end'; labelX = x1 - 6; room = labelX - left; }
     let inside = false;
@@ -285,9 +295,9 @@ export function mountCharts(container, { onCursor, onStage }) {
   function draw() {
     if (!data) return;
     width = contentWidth();
-    const left = width < 520 ? 36 : 48, right = Math.max(left + 1, width - 16);
+    const left = width < 520 ? 39 : 49, right = Math.max(left + 1, width - (width < 520 ? 13 : 20));
     const [start, end] = range, span = end - start;
-    const layout = { left, right, width, top: 9, scaleX: t => left + (t - start) / (span || 1) * (right - left) };
+    const layout = { left, right, width, top: 11, scaleX: t => left + (t - start) / (span || 1) * (right - left) };
     const samples = data.samples.slice(firstAt(data.samples, start), firstAt(data.samples, end, includeEnd));
     panels = PLOTS.map(config => metricPanel(config, samples, range, layout));
     panels.push(stagePanel(data.stages, range, layout, onStage));

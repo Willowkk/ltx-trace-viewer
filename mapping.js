@@ -141,19 +141,9 @@ function selectFor(label, choices) {
   return select;
 }
 
-function addStyles() {
-  if (document.getElementById('ltx-mapping-style')) return;
-  const style = element('link');
-  style.id = 'ltx-mapping-style';
-  style.rel = 'stylesheet';
-  style.href = new URL('./mapping.css', import.meta.url).href;
-  document.head.append(style);
-}
-
 export async function chooseCounterMapping(json) {
   const options = getCounterOptions(json);
   if (!options.length) throw new Error('未找到含数值字段的 Chrome Trace 计数器（ph="C"）。');
-  addStyles();
   const dialog = element('dialog');
   dialog.className = 'counter-dialog';
   dialog.setAttribute('aria-labelledby', 'counter-map-heading');
